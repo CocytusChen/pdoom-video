@@ -121,7 +121,8 @@ export default class Dense extends Scene {
     c.font = font(F.mono(500), 58); c.fillStyle = t >= wH.start ? rgba('bone', 0.95) : rgba('bone', 0.4);
     c.fillText(val.toLocaleString('en-US').padStart(7, ' '), 112, 178);
     c.font = font(F.mono(400), 14); c.fillStyle = rgba('bone', 0.5);
-    c.fillText(`util ${(97 + 2.9 * Math.abs(Math.sin(t * 3.1))).toFixed(1)}%  ·  1.4 GW  ·  ${GXY} cells`, 116, 212);
+    // 100k H100-class GPUs: ~70 MW of chips, ~140 MW at the wall with servers and cooling
+    c.fillText(`util ${(97 + 2.9 * Math.abs(Math.sin(t * 3.1))).toFixed(1)}%  ·  140 MW  ·  ${GXY} cells`, 116, 212);
     // P(doom) cameo: one more line on the dashboard, a hairline rule above it
     c.fillStyle = rgba('bone', 0.18); c.fillRect(116, 226, 348, 1);
     c.font = font(F.mono(500), 15); c.letterSpacing = '2px'; c.fillStyle = rgba('signal', 0.95);

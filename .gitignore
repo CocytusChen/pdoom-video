@@ -1,6 +1,7 @@
 .DS_Store
 node_modules/
 .vite/
+.claude/
 
 # renders
 out/
@@ -12,3 +13,6 @@ analysis/__pycache__/
 analysis/stems/
 analysis/work/
 analysis/qa/
+
+# the song is not ours to redistribute: put the Claude-Pop recording here yourself (see README)
+audio/*.mp3

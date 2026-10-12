@@ -92,8 +92,9 @@ export default class IlyaScene extends Scene {
           const hot = p > 0 && cool < 1 ? 1 - cool : 0;
           c.globalAlpha = k * fadeAll;
           c.fillStyle = hot > 0.02 ? mixRgba('bone', 'signal', hot, 0.95) : rgba('bone', 0.93);
-          c.fillText(w.w, x, y + (1 - k) * 10);
-          if (w === T.know) this.redactWord(c, t, x, y, ww, fs);
+          // once the bar has covered "know", don't draw it: it would show through the bar as both fade
+          if (!(w === T.know && t >= T.knowBar + 0.12)) c.fillText(w.w, x, y + (1 - k) * 10);
+          if (w === T.know) this.redactWord(c, t, x, y, ww, fs, fadeAll);
         }
         x += ww + sp;
       }
@@ -102,13 +103,13 @@ export default class IlyaScene extends Scene {
   }
 
   /** "know" is withheld too: a bar wipes over it on the downbeat while the sleep light breathes. */
-  private redactWord(c: CanvasRenderingContext2D, t: number, x: number, y: number, w: number, fs: number) {
+  private redactWord(c: CanvasRenderingContext2D, t: number, x: number, y: number, w: number, fs: number, alpha: number) {
     const T = this.room.T;
     const k = prog(t, T.knowBar, T.knowBar + 0.12, ease.outCubic);
     if (k <= 0) return;
     const bx = x - 8, by = y - fs * 0.78, bh = fs * 0.98, bw = (w + 16) * k;
     c.save();
-    c.globalAlpha = 1;
+    c.globalAlpha = alpha; // opaque over the word, but it fades out with the line
     c.fillStyle = rgba('ink2', 1);
     c.fillRect(bx, by, bw, bh);
     c.strokeStyle = rgba('bone', 0.28);

@@ -2,6 +2,7 @@
 import { Engine, type AdaptiveSampling } from './engine/engine';
 import { PW, PH, SCALE } from './engine/gl';
 import { makeTimeline } from './timeline';
+import { setOutputFps } from './engine/util';
 
 const params = new URLSearchParams(location.search);
 const EXPORT = params.has('export');
@@ -123,6 +124,7 @@ function setupExport() {
      */
     async stream(opts: { from: number; to: number; fps: number; ws: string; samples?: number | AdaptiveSampling; shutter?: number; inflight?: number }) {
       const snd = await sender(opts.ws, opts.inflight ?? 4);
+      setOutputFps(opts.fps); // per-frame jitter stays on the 60 fps grid at any output rate (util.frameIdx)
       const dt = 1 / opts.fps;
       const n0 = Math.round(opts.from * opts.fps), n1 = Math.round(opts.to * opts.fps);
       const S = opts.samples ?? 1, SH = opts.shutter ?? 0.5;

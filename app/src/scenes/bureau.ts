@@ -17,7 +17,7 @@ import { DEFAULT_POST, type PostParams } from '../engine/post';
 import LeftTurn from './leftturn';
 import { type Line, type Word, norm } from '../engine/lyrics';
 import { F, font, measure, layout, glyphX } from '../engine/type';
-import { strokeText, drawStrokeText, type StrokeText } from '../engine/stroke';
+import { strokeText, drawStrokeText, smoothStrokes, type StrokeText } from '../engine/stroke';
 import { clamp, ease, lerp, prog, hash, noise1, pulse, TAU, frameIdx } from '../engine/util';
 import { PDoom, formatPDoom } from '../engine/hud';
 
@@ -390,7 +390,7 @@ export default class Bureau extends Scene {
       });
     }
 
-    this.sig = strokeText('We', 'script', 120);
+    this.sig = smoothStrokes(strokeText('We', 'script', 120)); // seen close up: round off the font's segments
     this.obsHand = strokeText('obsolete', 'hscript', 124, 1);
     // the next plate, under the last page: its window as the timeline cuts it (on the beat at/before "Gato")
     const gato = lyrics.get('Gato').words[0]!.start;
@@ -694,6 +694,22 @@ export default class Bureau extends Scene {
     for (let i = 0; i < 2; i++) c.fillRect(x0 + 160, A.y - 105 + i * 64, x1 - x0 - 180, 1.2);
     c.fillStyle = PRINT(0.5); c.font = font(F.mono(400), 13);
     c.fillText('(describe observed behaviour; attach additional sheets if the system asks you to)', x0 + 160, A.y - 205);
+    // 1a. compute, filled in beforehand: the lyric's rate against the usual reporting threshold (a total of
+    // 1e26 FLOP), which 1e30 FLOP/s passes in a tenth of a millisecond
+    {
+      const y = A.y - 52;
+      c.fillStyle = PRINT(1);
+      c.font = font(F.mono(700), 16); c.letterSpacing = '3px';
+      c.fillText('1a.', x0 + 10, y);
+      c.fillText('COMPUTE', x0 + 52, y);
+      c.letterSpacing = '0px';
+      c.fillStyle = TYPE(0.9);
+      c.font = font(F.mono(500), 30);
+      c.fillText('1E30 FLOP/S', A.x - 520, y);
+      c.fillStyle = PRINT(0.6);
+      c.font = font(F.mono(400), 13);
+      c.fillText('(reporting threshold: 1E26 FLOP total. At this rate: 0.1 ms)', A.x - 300, y);
+    }
     // 2. RISK LEVEL
     label('2.', 'RISK LEVEL', A.y - 10);
     const opts = ['LOW', 'MODERATE', 'HIGH', 'SAFE ENOUGH'];
@@ -1108,6 +1124,12 @@ export default class Bureau extends Scene {
     c.restore();
   }
 
+  /**
+   * Fig. C.1, in the report's own terms (First Draft of a Report on the EDVAC, 1945): the organs CA and CC
+   * (together C) and M, "the associative neurons" (§2.6); I and O, the sensory and motor ones, which only
+   * ever talk to M (§2.7–2.8); R, the outside recording medium; M as 256 delay lines of 1,024 units (§12.7);
+   * and the E-element, the McCulloch–Pitts neuron the whole design is drawn in (§6).
+   */
   drawVonNeumann(c: Ctx2, t: number) {
     const shadowHatch = (x: number, y: number, w: number, h: number, off = 13) => {
       c.save();
@@ -1116,62 +1138,111 @@ export default class Bureau extends Scene {
       for (let d = 0; d < w + h + off; d += 8) { c.moveTo(x + off + d, y + off); c.lineTo(x + off + d - h, y + off + h); }
       c.stroke(); c.restore();
     };
-    const box = (x: number, y: number, w: number, h: number, title: string, sub?: string, hot = 0) => {
+    // an organ: its letter big, its name and a line of detail under it
+    const box = (x: number, y: number, w: number, h: number, letter: string, name: string, sub?: string, hot = 0) => {
       c.strokeStyle = PRINT(1); c.lineWidth = 2.6;
       c.strokeRect(x, y, w, h);
       if (hot > 0) { c.fillStyle = PRINT(0.08 * hot); c.fillRect(x + 6, y + 6, w - 12, h - 12); }
       c.fillStyle = PRINT(1); c.textAlign = 'center';
-      c.font = font(F.mono(600), 19); c.letterSpacing = '3px';
-      c.fillText(title, x + w / 2, y + h / 2 + (sub ? -4 : 7));
-      if (sub) { c.font = font(F.mono(400), 14); c.fillStyle = PRINT(0.65); c.fillText(sub, x + w / 2, y + h / 2 + 22); }
+      c.font = font(F.mono(700), 30); c.letterSpacing = '2px';
+      c.fillText(letter, x + w / 2, y + h / 2 - (sub ? 14 : 4));
+      c.font = font(F.mono(500), 14); c.letterSpacing = '3px';
+      c.fillText(name, x + w / 2, y + h / 2 + (sub ? 12 : 22));
+      if (sub) { c.font = font(F.mono(400), 13); c.letterSpacing = '0px'; c.fillStyle = PRINT(0.65); c.fillText(sub, x + w / 2, y + h / 2 + 34); }
       c.textAlign = 'left'; c.letterSpacing = '0px';
     };
-    const arrow = (x0: number, y0: number, x1: number, y1: number, both = false) => {
-      c.strokeStyle = PRINT(1); c.fillStyle = PRINT(1); c.lineWidth = 2.4;
-      c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke();
-      const head = (xa: number, ya: number, xb: number, yb: number) => {
-        const a = Math.atan2(yb - ya, xb - xa);
-        c.beginPath(); c.moveTo(xb, yb);
-        c.lineTo(xb - 18 * Math.cos(a - 0.35), yb - 18 * Math.sin(a - 0.35));
-        c.lineTo(xb - 18 * Math.cos(a + 0.35), yb - 18 * Math.sin(a + 0.35));
-        c.closePath(); c.fill();
-      };
-      head(x0, y0, x1, y1);
-      if (both) head(x1, y1, x0, y0);
+    const head = (xa: number, ya: number, xb: number, yb: number, s = 18) => {
+      const a = Math.atan2(yb - ya, xb - xa);
+      c.beginPath(); c.moveTo(xb, yb);
+      c.lineTo(xb - s * Math.cos(a - 0.35), yb - s * Math.sin(a - 0.35));
+      c.lineTo(xb - s * Math.cos(a + 0.35), yb - s * Math.sin(a + 0.35));
+      c.closePath(); c.fill();
     };
-    // fetch-decode-execute cycle, one stage per beat
+    // a wire through some corners, with a head at the end (and the start, if both)
+    const wire = (pts: [number, number][], both = false) => {
+      c.strokeStyle = PRINT(1); c.fillStyle = PRINT(1); c.lineWidth = 2.4;
+      c.beginPath(); pts.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y))); c.stroke();
+      const n = pts.length;
+      head(pts[n - 2]![0], pts[n - 2]![1], pts[n - 1]![0], pts[n - 1]![1]);
+      if (both) head(pts[1]![0], pts[1]![1], pts[0]![0], pts[0]![1]);
+    };
+    const note = (s: string, x: number, y: number, size = 24, a = 0.8, align: CanvasTextAlign = 'left') => {
+      c.fillStyle = PRINT(a); c.font = font(F.serif(400, true), size); c.textAlign = align;
+      c.fillText(s, x, y); c.textAlign = 'left';
+    };
+    // a cycle of the machine, one organ per beat: M (the order is read), CC, CA, the E-elements fire
     const bt = this.ctx.audio.beatAt(t);
     const stage = ((Math.floor(bt) % 4) + 4) % 4;
     const hot = (s: number) => (stage === s ? 1 - (bt - Math.floor(bt)) * 0.6 : 0);
+
+    // C = CC + CA, the associative part
     const cx = -330, cy = -225, cw = 660, ch = 330;
     shadowHatch(cx, cy, cw, ch, 15);
     c.strokeStyle = PRINT(1); c.lineWidth = 3; c.strokeRect(cx, cy, cw, ch);
     c.fillStyle = PRINT(1); c.font = font(F.mono(700), 18); c.letterSpacing = '4px';
-    c.fillText('CENTRAL PROCESSING UNIT', cx + 20, cy + 34);
+    c.fillText('C', cx + 20, cy + 34);
     c.letterSpacing = '0px';
-    box(cx + 40, cy + 70, 270, 100, 'CONTROL UNIT', 'decode', hot(1));
-    box(cx + 350, cy + 70, 270, 100, 'ALU', 'arithmetic / logic', hot(2));
-    box(cx + 40, cy + 200, 580, 90, 'REGISTERS', 'PC · IR · ACC · MAR · MDR', hot(3));
-    shadowHatch(-330, 225, 660, 115);
-    box(-330, 225, 660, 115, 'MEMORY UNIT', 'instructions + data, one bus', hot(0));
+    note('the associative part', cx + 48, cy + 34, 22, 0.7);
+    box(cx + 40, cy + 56, 270, 108, 'CC', 'CENTRAL CONTROL', 'orders, one at a time', hot(1));
+    box(cx + 350, cy + 56, 270, 108, 'CA', 'CENTRAL ARITHMETIC', '+ − × ÷, binary', hot(2));
+    // the E-elements: what CC and CA are made of (excitatory synapses end on the circle, an inhibitory one
+    // ends in a dot, the threshold is written inside, the arrow on the axon is the synaptic delay)
+    {
+      const ey = cy + 238, k = hot(3);
+      const el = (x: number, y: number, thr: string) => {
+        c.strokeStyle = PRINT(1); c.lineWidth = 2.2;
+        c.beginPath(); c.arc(x, y, 15, 0, TAU); c.stroke();
+        if (k > 0) { c.fillStyle = PRINT(0.25 * k); c.beginPath(); c.arc(x, y, 12, 0, TAU); c.fill(); }
+        if (thr) { c.fillStyle = PRINT(1); c.font = font(F.mono(600), 15); c.textAlign = 'center'; c.fillText(thr, x, y + 5); c.textAlign = 'left'; }
+      };
+      const ln = (x0: number, y0: number, x1: number, y1: number) => { c.strokeStyle = PRINT(1); c.lineWidth = 2; c.beginPath(); c.moveTo(x0, y0); c.lineTo(x1, y1); c.stroke(); };
+      const x1 = cx + 150, x2 = cx + 290;
+      ln(cx + 50, ey - 26, x1 - 13, ey - 7); ln(cx + 50, ey + 26, x1 - 13, ey + 7);
+      el(x1, ey, '2');
+      ln(x1 + 15, ey, x2 - 15, ey); c.fillStyle = PRINT(1); head(x1 + 15, ey, x1 + 62, ey, 13);
+      ln(x2 - 30, ey + 40, x2 - 8, ey + 14); c.beginPath(); c.arc(x2 - 8, ey + 14, 4.5, 0, TAU); c.fill(); // inhibitory
+      el(x2, ey, '');
+      ln(x2 + 15, ey, x2 + 75, ey); head(x2 + 15, ey, x2 + 62, ey, 13);
+      c.fillStyle = PRINT(0.65); c.font = font(F.mono(400), 13);
+      c.fillText('E-ELEMENTS (§6)', cx + 400, ey - 12);
+      c.fillText('after McCulloch & Pitts', cx + 400, ey + 8);
+      c.fillText('synaptic delay ≈ 1 µs', cx + 400, ey + 28);
+    }
+
+    // M: one memory for numbers and orders alike
+    shadowHatch(-330, 225, 660, 130);
+    box(-330, 225, 660, 130, 'M', 'MEMORY', '256 delay lines × 1,024 units = 8,192 numbers of 32', hot(0));
+    // I and O are the sensory and motor organs: R → I → M, M → O → R, never straight into or out of C
     shadowHatch(-790, -135, 260, 150);
-    box(-790, -135, 260, 150, 'INPUT', 'device');
+    box(-790, -135, 260, 150, 'I', 'INPUT', 'sensory (afferent)');
     shadowHatch(530, -135, 260, 150);
-    box(530, -135, 260, 150, 'OUTPUT', 'device');
-    arrow(-530, -60, cx - 4, -60);
-    arrow(cx + cw + 4, -60, 526, -60);
-    arrow(-60, cy + ch + 4, -60, 221, true);
-    arrow(60, cy + ch + 4, 60, 221, true);
-    c.fillStyle = PRINT(0.8); c.font = font(F.serif(400, true), 30);
-    c.fillText('the bottleneck', 100, 180);
-    // the instruction token shuttling over the bus, one trip per beat
+    box(530, -135, 260, 150, 'O', 'OUTPUT', 'motor (efferent)');
+    wire([[-660, 19], [-660, 290], [-334, 290]]);
+    wire([[334, 290], [660, 290], [660, 19]]);
+    // R, the outside recording medium, drawn as a strip of punched tape over each
+    const tape = (x: number, y: number, w: number) => {
+      c.strokeStyle = PRINT(1); c.lineWidth = 2; c.strokeRect(x, y, w, 46);
+      c.fillStyle = PRINT(0.9);
+      for (let i = 0; i < Math.floor(w / 18); i++) for (let r = 0; r < 3; r++) if (hash(i, r, 41) < 0.45) { c.beginPath(); c.arc(x + 12 + i * 18, y + 11 + r * 12, 3.2, 0, TAU); c.fill(); }
+    };
+    tape(-790, -255, 260); tape(530, -255, 260);
+    c.fillStyle = PRINT(1); c.font = font(F.mono(700), 22); c.fillText('R', -790, -268); c.fillText('R', 530, -268);
+    c.fillStyle = PRINT(0.65); c.font = font(F.mono(400), 13); c.fillText('outside recording medium', -762, -270); c.fillText('tape, cards, wire', 558, -270);
+    wire([[-660, -205], [-660, -139]]);
+    wire([[660, -139], [660, -205]]);
+    note('“never directly into C” (§2.7)', -645, 160, 20, 0.7);
+    // C ↔ M: the one channel
+    wire([[-60, cy + ch + 4], [-60, 221]], true);
+    wire([[60, cy + ch + 4], [60, 221]], true);
+    note('the bottleneck (Backus, 1977)', 100, 180, 26); // the term is Backus's, not the report's
+    // the order shuttling over the channel, one trip per beat
     const u = bt - Math.floor(bt);
     const up = Math.floor(bt) % 2 === 0;
     const ty = up ? lerp(215, 118, ease.inOutCubic(u)) : lerp(118, 215, ease.inOutCubic(u));
     c.fillStyle = PRINT(1); c.fillRect(up ? -70 : 50, ty - 8, 20, 16);
-    c.fillStyle = PRINT(0.85); c.font = font(F.serif(400, true), 30);
-    c.fillText('Fig. C.1 — The stored-program computer (1945).', 372, 262);
-    c.fillText('One memory, one bus, one thing at a time.', 372, 298);
+    // caption, under the figure
+    note('Fig. C.1 — The EDVAC as von Neumann drew it up (1945): C and M are “the associative', -790, 420, 26, 0.85);
+    note('neurons”, I and O the sensory and motor ones. One memory, one channel, one thing at a time.', -790, 454, 26, 0.85);
   }
 
   override dispose() {

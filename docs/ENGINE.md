@@ -1,6 +1,6 @@
 # Engine guide (for scene authors)
 
-The video is a web app (`app/`, TypeScript + three.js, run with bun + Vite) that renders any song time `t` deterministically at 1920×1080 (or at 2× that, 3840×2160, with `?scale=2`; see "Output scale" below). The same code drives the live preview and the offline 60 fps export.
+The video is a web app (`app/`, TypeScript + three.js, run with bun + Vite) that renders any song time `t` deterministically at 1920×1080 (or at 2× that, 3840×2160, with `?scale=2`; see "Output scale" below). The same code drives the live preview and the offline export (60 fps by default; `--fps 120` and other rates work, see `frameIdx` below).
 
 ## Running things
 
@@ -12,7 +12,7 @@ The video is a web app (`app/`, TypeScript + three.js, run with bun + Vite) that
 - Typecheck just your files: `bunx tsc --noEmit -p tsconfig.json 2>&1 | grep scenes/yourscene`.
 - The render script prints `SCENE ERRORS` and browser console errors — read them.
 - 4K: add `--scale 2` to any mode (`stills` then saves full-resolution 3840×2160 PNGs). Check your scene at both scales: downscaled, the 4K frame should look like the 1080p one, only sharper.
-- Renders while files are being edited: run a server without live reload (`PDOOM_NO_HMR=1 bunx vite --port 5190`) and pass `--url http://localhost:5190`; a live-reloading server reloads the page mid-render. The private server that `render.ts` starts when none is reachable already runs without it.
+- Renders while files are being edited: run a server without live reload (`PDOOM_NO_HMR=1 bun x vite --port 5190`) and pass `--url http://localhost:5190`; a live-reloading server reloads the page mid-render. The private server that `render.ts` starts when none is reachable already runs without it.
 
 ## Data
 
@@ -94,8 +94,9 @@ The export renders every frame as the average of many sub-frames spread over the
 What this asks of scenes:
 
 - Sub-frames are rendered out of time order and in any number: a scene's output must depend on `f.t` only. `stateful` scenes can't be sampled adaptively (the engine refuses); nothing may count `render()` calls.
-- Per-frame flicker and jitter keyed to 60 fps must use `frameIdx(t)` (`util.ts`), not `Math.floor(t * 60)`. `frameIdx` is constant over the frame's shutter; `floor` switches at the frame's own time and double-exposes two states in every frame.
+- Per-frame flicker and jitter keyed to 60 fps must use `frameIdx(t)` (`util.ts`), not `Math.floor(t * 60)`. `frameIdx` is constant over the frame's shutter; `floor` switches at the frame's own time and double-exposes two states in every frame. It stays on the 60 fps grid at any export rate (`setOutputFps`, called by the export): at 120 fps a flicker still steps at 60 Hz, held for two frames, so discontinuous effects look as they do at 60 while continuous motion gets the extra frames.
 - Noise that changes with continuous `t` (a hash seeded by time) is resampled in every sub-frame: it averages out, but slowly, and makes the adaptive sampler work harder. Seed it with `frameIdx(t)` unless it is meant to smooth out.
+- Don't take `fwidth`/`dFdx` of a value computed inside a loop with a data-dependent `break`: on ANGLE's Direct3D backend (Windows) the derivative comes back 0, and whatever it antialiases disappears. Take finite differences of the function instead (as `leftturn-map.ts` does for its contours), or compute the derivative outside the loop.
 - A spark emitter whose rate varies over time passes the rate as a function of the birth time, with its maximum (`sparkParticles(..., { rate: (tb) => ..., rateMax })`). A rate read at the current `t` re-times every particle from one sub-frame to the next.
 - Shaders that supersample internally (4 rotated-grid taps) take `ssTap: SS_TAP` and `${SS_TAP_GLSL}` and loop `for (int k = ssK0(); k < ssK1(); k++) ... rgss(k)`, weighting by `ssWeight()`. The engine then hands each sub-frame one tap, cycling them (every set is a multiple of 4), which averages to the same image for a quarter of the cost. In the preview and single-sample stills they take all four.
 - Post parameters (shake, flash, zoom, fades, the HUD mode) are read at one point of the shutter, 1/8 of it after the frame's time (where the video was tuned, and a point every sample set includes); the HUD, grain and dither are drawn once per frame.

@@ -405,7 +405,7 @@ export default class Paperclips extends Scene {
     c.fillRect(pad, 156, cw - pad * 2, 1);
     c.font = font(F.mono(400), 19);
     c.fillStyle = rgba('bone', 0.74);
-    const body = ["I'm out of office with limited access to", 'the killswitch. For urgent matters,', 'please contact —'];
+    const body = ["I'm out of office with limited access to", 'the killswitch. For urgent matters,', 'please contact the model directly.'];
     body.forEach((s, i) => c.fillText(s, pad, 194 + i * 29));
     c.font = font(F.mono(400), 13);
     c.fillStyle = rgba('graphite', 1);

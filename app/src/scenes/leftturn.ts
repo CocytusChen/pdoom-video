@@ -1,21 +1,27 @@
 // "Trajectory, revised". Verse 3, part 2. One continuous drawing sheet, the camera never at rest.
+// The line is about symbolic AI: Lisp was to be the road to AGI, and AGI arrived "without a single
+// cdr" (the Lisp list operation), by the numeric route of the line before ("Forward MLP, backward,
+// repeat"). Symbols are the plan; the thing that arrives is all numbers.
 //  0. The run-in (drawn by `bureau`, which renders this plate under its last page): the spark comes up
-//     the critical path from the south, under the page, bursts through it on the beat before the cut and
+//     the list from the south, under the page, bursts through it on the beat before the cut and
 //     burns it in two; the held camera picks up the chase as it nears the top, and the halves swing away.
-//  1. "Sharp left turn": a top-down engineering roadmap (SRR · PDR · CDR · TRR · LAUNCH); the
-//     spark runs the planned route, lyrics painted on it as road markings; on "left" it swerves
-//     90° and the camera whips round with it (true multi-tap motion blur), leaving the plan.
+//  1. "Sharp left turn": the symbolic roadmap to AGI drawn as a Lisp list in box-and-pointer
+//     notation (LISP · SHRDLU · CADR · EXPERT SYSTEMS · AGI, then NIL), every step a cdr pointer;
+//     the spark runs the planned route, evaluating the cells it passes, lyrics painted on it as
+//     road markings; on "left" it swerves 90° and the camera whips round with it (true multi-tap
+//     motion blur), leaving the plan.
 //  2. "and there you are": AND / THERE keep being painted on the new road as the spark brakes
 //     into terra incognita; on "there" it lands in a crater, a survey marker drops and the
 //     contour lines ripple. On "you" the camera cranes out with a quarter-turn: the crater is an
 //     eye, the terrain is the mask (a topographic smile). YOU / ARE are stamped on it as map
-//     labels; the second eye lights; a deadpan callout files it as an unplanned object.
-//  3. "Without a single CDR": a whip north to the review schedule on the same sheet. Time runs
-//     along x at the song's rate: the lyric words are Gantt bars filled as sung, cascading into
-//     the milestone lane; SRR and PDR are stamped on the beats; the playhead stalls at an empty,
-//     dashed CDR slot while the camera punches in on each syllable; then it zips past TRR
-//     (skipped) to LAUNCH (ahead of schedule). Everything drains but the empty slot, which
-//     folds into the orange caret of the next prompt.
+//     labels; the second eye lights; its spot heights are weights, not symbols; a deadpan callout
+//     files it as an unplanned object.
+//  3. "Without a single CDR": a whip north to the lyric itself, drawn as a list on the same sheet:
+//     each word is consed into a cell as it is sung, the previous cdr pointer shooting across to
+//     it, the last car being CDR. Then each syllable, C, D, R, cuts one of the three pointers (a
+//     snap, a NIL slash through the cdr box) and the list falls apart into loose atoms. Everything
+//     drains but the last cell's empty cdr box, which folds into the orange caret of the next
+//     prompt: the rest of the list is the next line.
 import * as THREE from 'three';
 import { Scene, type Frame, type PostOverrides } from '../engine/scene';
 import { W, H } from '../engine/gl';
@@ -25,8 +31,8 @@ import { F, font, layout } from '../engine/type';
 import { Lyrics, norm, type Line, type Word } from '../engine/lyrics';
 import { clamp, ease, keys, lerp, prog, pulse } from '../engine/util';
 import { sparkHead, sparkParticles } from './_motifs';
-import { MAP, FACE, EYE_R, routeAt, ROUTE_LA, ROUTE_LC, ROUTE_EYE, mapTextures, makeMapPass, WorldLayer } from './leftturn-map';
-import { GANTT, Schedule } from './leftturn-gantt';
+import { MAP, FACE, EYE_R, routeAt, ROUTE_LA, ROUTE_LC, ROUTE_EYE, cellBox, mapTextures, makeMapPass, WorldLayer } from './leftturn-map';
+import { LIST, LispList } from './leftturn-list';
 import { PDoom, formatPDoom } from '../engine/hud';
 
 function wordOf(l: Line, s: string): Word {
@@ -41,6 +47,13 @@ function mixCam(a: Cam, b: Cam, k: number): Cam {
   return { x: lerp(a.x, b.x, k), y: lerp(a.y, b.y, k), rot: lerp(a.rot, b.rot, k), zoom: Math.exp(lerp(Math.log(a.zoom), Math.log(b.zoom), k)) };
 }
 
+/** Spot heights on the unplanned object (face units, value): weights, where a map would have symbols. */
+const SPOTS: [number, number, string][] = [
+  [-0.66, -0.4, '0.0137'], [0.62, -0.52, '−0.4421'], [-0.82, 0.1, '1.2e−3'], [-0.14, -0.02, '−0.0019'],
+  [-0.64, 0.46, '0.2208'], [0.62, 0.4, '−0.0716'], [-0.08, 0.24, '0.5003'],
+  [-1.25, -0.35, '0.0094'], [-1.1, 0.78, '−1.307'], [0.2, 1.08, '0.0661'], [1.1, 0.75, '−0.0352'], [-0.4, -1.1, '0.0008'],
+];
+
 /** The gato prompt's caret on its first frame (screen px): the slot lands exactly there. */
 const CARET = { x: 1150, y: 631, w: 5.6, h: 86 };
 
@@ -48,7 +61,7 @@ const CARET = { x: 1150, y: 631, w: 5.6, h: 86 };
  * The run-in, under and through the bureau's last page. The camera is held (tilting up by `drift` px over the
  * beat before the burst); the spark smoulders north at `creep` (map units/s), its head coming into the frame
  * (screen y `enter`) on the off-beat before the burst; on the burst it flares up to `speed`, which it keeps to
- * SRR. The camera picks up the chase as the head reaches screen y `park` (`hold`: how softly, map units), then
+ * LISP. The camera picks up the chase as the head reaches screen y `park` (`hold`: how softly, map units), then
  * eases ahead of it into the roadmap's framing by the turn.
  */
 const RUN = { creep: 800, speed: 3600, zoom: 0.86, enter: 1100, park: 350, drift: 36, hold: 60 };
@@ -63,7 +76,7 @@ export default class LeftTurn extends Scene {
   ov = new WorldLayer();
   glow = new LineBatch(6000);
   pd!: PDoom;
-  sch!: Schedule;
+  lst!: LispList;
   /** Rendered inside `bureau`'s transition: that plate draws the spark itself, over its page. */
   embedded = false;
   /** The held camera of the run-in (map y, before its drift), and the lead (map units) it picks the spark up at. */
@@ -73,8 +86,7 @@ export default class LeftTurn extends Scene {
   T = {
     l5: null as unknown as Line, l6: null as unknown as Line,
     sharp: 0, left: 0, turn: 0, and: 0, there: 0, you: 0, youEnd: 0, are: 0, without: 0, cdr: 0,
-    tPDR: 0, db1: 0, call: 0, whip0: 0, snare: 0, launch: 0, drain0: 0, cdrSyl: [] as number[],
-    beats: [] as number[], burst: 0,
+    tShrdlu: 0, db1: 0, call: 0, whip0: 0, drain0: 0, cdrSyl: [] as number[], burst: 0,
   };
 
   override init() {
@@ -100,57 +112,46 @@ export default class LeftTurn extends Scene {
     const cdr = wordOf(T.l6, 'cdr');
     T.cdr = cdr.start;
     T.cdrSyl = cdr.syl && cdr.syl.length >= 3 ? cdr.syl.map((s) => s[0]) : [0, 1, 2].map((i) => cdr.start + i * 0.4);
-    T.tPDR = beatAfter(T.sharp + 0.12);
+    T.tShrdlu = beatAfter(T.sharp + 0.12);
     // the spark bursts through the bureau's page on the beat before the cut; the camera is held so that
     // its head comes into the frame there
     T.burst = beatBefore(this.ctx.start - 0.05);
     this.beat = au.timeOfBeat(Math.round(au.beatAt(T.burst)) + 1) - T.burst;
+    T.db1 = downAfter(T.you);
+    T.call = beatAfter(T.are + 0.2);
+    T.whip0 = Math.max(beatBefore(T.without), T.without - 0.3) - 0.03;
+    T.drain0 = beatBefore(this.ctx.end - 0.05);
+    const head = T.l6.words.filter((w) => norm(w.w) !== 'cdr');
+    this.lst = new LispList({ words: head, cdr, syl: T.cdrSyl, drain0: T.drain0, end: this.ctx.end }, formatPDoom(this.pd.value(T.without)));
     // screen y -> camera-relative map units at the run-in zoom (the inverse of the keystone)
     const K = this.kAt(T.burst), unproject = (y: number) => (y - H / 2) / (1 + K * (y - H / 2)) / RUN.zoom;
     const tIn = T.burst - this.beat / 2;
     this.holdY = MAP.Y0 - this.runIn(tIn) - unproject(RUN.enter) + this.driftAt(tIn) / RUN.zoom;
     this.leadPark = unproject(RUN.park);
-    T.db1 = downAfter(T.you);
-    T.call = beatAfter(T.are + 0.2);
-    T.whip0 = Math.max(beatBefore(T.without), T.without - 0.3) - 0.03;
-    const SRR = beatAfter(T.without + 0.05);
-    const PDR = downAfter(SRR + 0.05);
-    const TRR = downAfter(T.cdrSyl[1]!);
-    T.launch = beatAfter(T.cdrSyl[2]! + 0.1);
-    T.snare = beatBefore(T.cdr);
-    T.drain0 = beatBefore(this.ctx.end - 0.05);
-    T.beats = [];
-    for (let b = Math.floor(au.beatAt(T.without - 1)); au.timeOfBeat(b) < this.ctx.end + 1; b++) T.beats.push(au.timeOfBeat(b));
-    const head = T.l6.words.filter((w) => norm(w.w) !== 'cdr');
-    this.sch = new Schedule({
-      t0: T.without, words: head, cdr, syl: T.cdrSyl, SRR, PDR, TRR, LAUNCH: T.launch,
-      zip0: T.launch - 0.24, beats: T.beats, downbeats: au.downbeats.filter((d) => d > T.without - 1 && d < this.ctx.end + 1),
-      drain0: T.drain0, end: this.ctx.end,
-    }, formatPDoom(this.pd.value(T.without)));
   }
 
   // ---------------------------------------------------------------- the spark on the route
   /**
-   * Arc length on the run-in (negative: south of YOU ARE HERE): RUN.creep under the page, smoothly up to
-   * RUN.speed across the burst, at SRR on "Sharp". Closed form of the integral of that speed.
+   * Arc length on the run-in (negative: south of the `roadmap` variable): RUN.creep under the page, smoothly up
+   * to RUN.speed across the burst, at LISP on "Sharp". Closed form of the integral of that speed.
    */
   runIn(t: number) {
-    const T = this.T, a = T.burst - 0.03, b = T.burst + 0.1, srr = MAP.Y0 - MAP.ms[0]!.y;
+    const T = this.T, a = T.burst - 0.03, b = T.burst + 0.1, lisp = MAP.Y0 - MAP.ms[0]!.y;
     const ramp = (t: number) => {
       const u = clamp((t - a) / (b - a));
       return t >= b ? (b - a) / 2 + (t - b) : (b - a) * (u * u * u - (u * u * u * u) / 2);
     };
     const dist = (t: number) => RUN.creep * t + (RUN.speed - RUN.creep) * ramp(t);
-    return srr - (dist(T.sharp) - dist(t));
+    return lisp - (dist(T.sharp) - dist(t));
   }
 
   sparkS(t: number) {
     const T = this.T;
-    const srr = MAP.Y0 - MAP.ms[0]!.y, pdr = MAP.Y0 - MAP.ms[1]!.y;
+    const lisp = MAP.Y0 - MAP.ms[0]!.y, shrdlu = MAP.Y0 - MAP.ms[1]!.y;
     const tc = T.left + 0.13, sc = ROUTE_LA + ROUTE_LC + 40;
     if (t < T.sharp) return this.runIn(t);
     if (t < tc) {
-      return keys(t, [[T.sharp, srr], [T.tPDR, pdr, ease.linear], [T.left, ROUTE_LA - 10, ease.linear], [tc, sc, ease.linear]]);
+      return keys(t, [[T.sharp, lisp], [T.tShrdlu, shrdlu, ease.linear], [T.left, ROUTE_LA - 10, ease.linear], [tc, sc, ease.linear]]);
     }
     // out of the corner at speed, braking into the crater on "there" (cubic Hermite, v1 = 0)
     const D = ROUTE_EYE - sc, dur = T.there - tc, v0 = (ROUTE_LC + 50) / 0.13;
@@ -191,46 +192,44 @@ export default class LeftTurn extends Scene {
     return { x: FACE.x + 60 - 150 * snap, y: FACE.y + 40 + 45 * snap, rot, zoom: z };
   }
 
-  /** Tracking the playhead along the schedule, punching on the stamps. */
+  /** Riding the list as it is consed: the newest cell right of centre, a punch on each new cell. */
   camTrack(t: number): Cam {
-    const T = this.T, S = this.sch.T;
-    let z = 1.22 * (1 + 0.05 * ease.outExpo(prog(t, S.PDR, S.PDR + 0.25)));
-    z *= 1 + 0.05 * pulse(t, S.SRR, 0.08) + 0.06 * pulse(t, S.PDR, 0.08);
-    z *= 1 - 0.07 * prog(t, T.snare, T.cdr, ease.inQuad);
-    const rot = -0.025 + 0.05 * ease.outBack(prog(t, S.PDR, S.PDR + 0.35));
-    // the playhead sits left of centre; each stamp shoves the camera forward a touch
-    const surge = 26 * (pulse(t, S.SRR, 0.1) + pulse(t, S.PDR, 0.1));
-    const off = this.screenToWorldOffset(960 - 600 + surge, 0, rot, z);
-    return { x: this.sch.X(t) + off.x, y: GANTT.GL - 222 + off.y, rot, zoom: z };
+    const st = this.lst.start;
+    let z = 0.98 * (1 + 0.04 * ease.outExpo(prog(t, st[1]!, st[1]! + 0.25)));
+    z *= 1 + 0.05 * pulse(t, st[1]!, 0.08) + 0.06 * pulse(t, st[2]!, 0.08);
+    const rot = -0.025 + 0.045 * ease.outBack(prog(t, st[2]!, st[2]! + 0.35));
+    const off = this.screenToWorldOffset(-230, 0, rot, z);
+    return { x: this.lst.focusX(t) + off.x, y: LIST.GL - 30 + off.y, rot, zoom: z };
   }
 
-  /** The empty slot, one punch per syllable. */
-  camSlot(t: number): Cam {
-    const T = this.T;
-    const [, D, R] = T.cdrSyl as [number, number, number];
-    let z = 2.1 * (1 + 0.1 * prog(t, T.cdr, D, ease.inOutQuad)) * (1 + 0.16 * ease.outExpo(prog(t, D, D + 0.14))) * (1 + 0.18 * ease.outExpo(prog(t, R, R + 0.14)));
-    // the snare between the syllables nudges the frame: a punch and a small roll
-    const sn = this.ctx.audio.events('snare', T.cdr + 0.2, D - 0.05).map((e) => e[0]);
+  /** The whole list, punching on each syllable as its pointer is cut, rolling on the snares. */
+  camAll(t: number): Cam {
+    const T = this.T, b = this.lst.bounds;
+    const [C, D, R] = T.cdrSyl as [number, number, number];
+    let z = (W * 0.88) / (b.x1 - b.x0 + 200);
+    z *= 1 + 0.06 * prog(t, C, this.ctx.end, ease.inOutQuad);
+    z *= 1 + 0.07 * pulse(t, C, 0.1) + 0.08 * pulse(t, D, 0.1) + 0.1 * pulse(t, R, 0.1);
     let roll = 0;
-    for (const s of sn) { z *= 1 + 0.06 * pulse(t, s, 0.1); roll += 0.025 * ease.outBack(prog(t, s, s + 0.25)); }
-    const rot = roll + 0.035 * ease.outExpo(prog(t, D, D + 0.14)) - 0.08 * ease.outExpo(prog(t, R, R + 0.14));
-    const s = this.sch.slot;
-    return { x: s.x + 190 + 20 * prog(t, T.cdr, T.launch), y: s.y + 10, rot, zoom: z };
+    for (const s of this.ctx.audio.events('snare', C + 0.2, D - 0.05).map((e) => e[0])) { z *= 1 + 0.04 * pulse(t, s, 0.1); roll += 0.012 * ease.outBack(prog(t, s, s + 0.25)); }
+    const rot = roll + 0.02 * ease.outExpo(prog(t, D, D + 0.14)) - 0.035 * ease.outExpo(prog(t, R, R + 0.14));
+    return { x: (b.x0 + b.x1) / 2 + 30, y: LIST.GL + 40, rot, zoom: z };
   }
 
-  /** The reveal of the whole schedule, then the push into the slot, anchored where the caret will be. */
+  /**
+   * The whole list; once it is cut, a slow reframe that leaves the loose atoms behind and puts the
+   * empty cdr box where the prompt's caret will be; then the push onto it.
+   */
   camEnd(t: number): Cam {
     const T = this.T, end = this.ctx.end;
-    // the whole schedule, drifting in
-    const x0 = this.sch.X(T.without - 0.45), x1 = this.sch.X(T.launch) + 150;
-    const wide: Cam = { x: (x0 + x1) / 2, y: GANTT.GL - 190, rot: 0.012 * prog(t, T.launch, T.drain0), zoom: 0.95 * (1 + 0.035 * prog(t, T.launch + 0.3, T.drain0 + 0.2)) };
-    // then the push into the slot, anchored where the prompt's caret will be
-    const zEnd = (CARET.h / 2) / GANTT.DS;
-    const k = ease.inOutCubic(prog(t, T.drain0, end - 0.07));
-    const z = Math.exp(lerp(Math.log(wide.zoom), Math.log(zEnd), k));
-    const s = this.sch.slot;
+    const wide = this.camAll(t);
+    const R = T.cdrSyl[2]!;
+    const k1 = ease.inOutCubic(prog(t, R + 0.15, T.drain0 + 0.1));
+    const k2 = ease.inOutCubic(prog(t, T.drain0, end - 0.07));
+    const z = wide.zoom * Math.exp(lerp(0, Math.log(1.4), k2));
+    const s = this.lst.slot;
     const anch: Cam = { x: s.x - (CARET.x - W / 2) / z, y: s.y - (CARET.y - H / 2) / z, rot: 0, zoom: z };
-    const c = mixCam(wide, anch, k);
+    const c = mixCam(wide, anch, k1);
+    c.rot = lerp(wide.rot, 0, Math.max(k1, k2));
     c.zoom = z;
     return c;
   }
@@ -253,13 +252,13 @@ export default class LeftTurn extends Scene {
       return c;
     }
     if (t < T.cdr - 0.02) return this.camTrack(t);
-    if (t < T.launch - 0.03) return mixCam(this.camTrack(Math.min(t, T.cdr + 0.2)), this.camSlot(t), ease.outExpo(prog(t, T.cdr - 0.02, T.cdr + 0.18)));
-    return mixCam(this.camSlot(Math.min(t, T.launch + 0.4)), this.camEnd(t), ease.outExpo(prog(t, T.launch - 0.03, T.launch + 0.4)));
+    // on C the camera pulls back to the whole list, where the cuts happen
+    return mixCam(this.camTrack(Math.min(t, T.cdr + 0.25)), this.camEnd(t), ease.outExpo(prog(t, T.cdr - 0.02, T.cdr + 0.25)));
   }
 
   kAt(t: number) {
     const T = this.T;
-    return keys(t, [[T.you, 0.00035], [T.db1 + 0.1, 0.0002, ease.inOutCubic], [T.without, 0.00016, ease.inOutCubic], [T.launch, 0.00016], [T.drain0, 0.0001, ease.linear], [this.ctx.end - 0.08, 0, ease.inOutCubic]]);
+    return keys(t, [[T.you, 0.00035], [T.db1 + 0.1, 0.0002, ease.inOutCubic], [T.without, 0.00016, ease.inOutCubic], [T.cdr + 0.3, 0.00016], [T.drain0, 0.0001, ease.linear], [this.ctx.end - 0.08, 0, ease.inOutCubic]]);
   }
 
   /** How whip-like the camera move is right now (drives the in-shader shutter). */
@@ -270,7 +269,6 @@ export default class LeftTurn extends Scene {
       prog(t, T.you, T.you + 0.05) * (1 - prog(t, T.db1 - 0.05, T.db1 + 0.1)),
       prog(t, T.whip0, T.whip0 + 0.05) * (1 - prog(t, T.without - 0.03, T.without + 0.03)),
       prog(t, T.cdr - 0.02, T.cdr) * (1 - prog(t, T.cdr + 0.08, T.cdr + 0.16)),
-      prog(t, T.launch - 0.03, T.launch) * (1 - prog(t, T.launch + 0.15, T.launch + 0.3)),
     );
   }
 
@@ -299,7 +297,7 @@ export default class LeftTurn extends Scene {
     return (this.holdY - this.camAt(t).y) * RUN.zoom;
   }
 
-  /** The spark(s) riding the route and the schedule, additive over `out`. */
+  /** The spark on the route, and the sparks on the lyric's list, additive over `out`. */
   renderSpark(out: THREE.WebGLRenderTarget, t: number) {
     const T = this.T, cam = this.camAt(t);
     const g = this.glow; g.clear();
@@ -310,14 +308,22 @@ export default class LeftTurn extends Scene {
       sparkParticles(g, t, headAt, { rate: 120, speed: 280, intensity: 1.1 * I, seed: 8, width: 2 });
       sparkHead(g, hp.x, hp.y, t, 1.5 * Math.min(cam.zoom, 1.2), 1.3 * I);
     }
-    const S = this.sch.T;
-    if (t > T.without - 0.1 && t < S.LAUNCH + 0.5) {
-      const headAt = (tt: number) => this.project(this.sch.playX(tt), GANTT.GL, this.camAt(tt), this.kAt(tt));
+    // on the list: a spark rides each pointer as it is consed, and flashes where each one is cut
+    const lst = this.lst;
+    if (t > T.without - 0.1 && t < T.drain0) {
+      const onScreen = (p: { x: number; y: number } | null, tt: number) => (p ? this.project(p.x, p.y, this.camAt(tt), this.kAt(tt)) : null);
+      const headAt = (tt: number) => onScreen(lst.headAt(tt), tt);
+      sparkParticles(g, t, headAt, { rate: 110, speed: 240, intensity: 0.9, seed: 12, width: 1.6 });
       const hp = headAt(t);
-      const I = prog(t, T.without - 0.1, T.without) * (1 - prog(t, S.LAUNCH + 0.1, S.LAUNCH + 0.45));
-      const stall = t > T.cdr - 0.1 && t < S.zip0;
-      sparkParticles(g, t, headAt, { rate: stall ? 50 : 110, speed: stall ? 160 : 240, intensity: 0.9 * I, seed: 12, width: 1.6 });
-      sparkHead(g, hp.x, hp.y, t, 0.9 * Math.min(Math.sqrt(cam.zoom), 1.5), 1.2 * I);
+      if (hp) sparkHead(g, hp.x, hp.y, t, 0.9 * Math.min(Math.sqrt(cam.zoom), 1.5), 1.2);
+      lst.links.forEach((l, k) => {
+        if (t < l.cut || t > l.cut + 0.5) return;
+        const at = (tt: number) => (tt >= l.cut && tt < l.cut + 0.05 ? onScreen(lst.breakAt(k, tt), tt) : null);
+        sparkParticles(g, t, at, { rate: 420, speed: 380, intensity: 1.2, seed: 20 + k, width: 1.6 });
+        const I = pulse(t, l.cut, 0.09);
+        const p = onScreen(lst.breakAt(k, t), t)!;
+        if (I > 0.02) sparkHead(g, p.x, p.y, t, 1.3 * Math.min(Math.sqrt(cam.zoom) * 1.4, 1.5), 1.6 * I);
+      });
     }
     g.render(this.ctx.renderer, out);
   }
@@ -358,7 +364,7 @@ export default class LeftTurn extends Scene {
     (u.uMarkHot!.value as THREE.Vector4).set(hot(wSharp), hot(wLeft), hot(wTurn), 0);
     (u.uMarkOn2!.value as THREE.Vector2).set(on(wAnd), on(wThere));
     (u.uMarkHot2!.value as THREE.Vector2).set(hot(wAnd), hot(wThere));
-    (u.uChecks!.value as THREE.Vector2).set(prog(t, T.sharp, T.sharp + 0.04), prog(t, T.tPDR, T.tPDR + 0.04));
+    (u.uChecks!.value as THREE.Vector2).set(prog(t, T.sharp, T.sharp + 0.04), prog(t, T.tShrdlu, T.tShrdlu + 0.04));
     (u.uEye!.value as THREE.Vector2).set(prog(t, T.there, T.there + 0.1), prog(t, T.are - 0.02, T.are + 0.08));
     // the face breathes on the beat: ripples through the contours, the eyes flare on the kicks
     const au = this.ctx.audio;
@@ -373,16 +379,16 @@ export default class LeftTurn extends Scene {
     const we = t - T.there;
     (u.uWave!.value as THREE.Vector4).set(EYE_R.x, EYE_R.y, 1700 * Math.max(0, we), we > 0 ? 1.8 * Math.exp(-we / 0.35) : 0);
 
-    // ---- the world overlay (labels, schedule), drawn with the current camera
+    // ---- the world overlay (labels, the lyric list), drawn with the current camera
     const L = this.ov;
     L.begin(cam);
     const c = L.c;
     if (t < T.there) this.drawStamps(c, t);
-    if (t < T.without + 0.05) this.drawTerrain(c);
+    if (t < T.without + 0.05) this.drawTerrain(c, t);
     if (t >= T.and - 0.3 && t < T.without + 0.05) this.drawArrival(c, t, L.px);
     if (t >= T.whip0 - 0.05) {
       const morph = ease.inOutCubic(prog(t, T.drain0 + 0.08, end - 0.1));
-      this.sch.draw(c, t, L.px, {
+      this.lst.draw(c, t, L.px, {
         alpha: 1, keep: 1 - prog(t, T.drain0, T.drain0 + 0.3, ease.inOutQuad), morph,
         caret: { hw: (CARET.w / 2) / cam.zoom, hh: (CARET.h / 2) / cam.zoom },
       });
@@ -395,12 +401,12 @@ export default class LeftTurn extends Scene {
     if (!this.embedded) this.renderSpark(out, t);
 
     // ---- post
-    const S = this.sch.T;
+    const lst = this.lst;
     const corner = pulse(t, T.left, 0.08);
     const land = pulse(t, T.there, 0.07);
-    const stampHit = Math.max(pulse(t, S.SRR, 0.06), pulse(t, S.PDR, 0.07), pulse(t, S.LAUNCH, 0.07));
+    const consHit = Math.max(...lst.start.slice(1, 3).map((s) => pulse(t, s, 0.06)));
     const sylHit = Math.max(...T.cdrSyl.map((s) => pulse(t, s, 0.06)));
-    const sh = 10 * corner + 16 * land + 6 * stampHit + 7 * sylHit;
+    const sh = 10 * corner + 16 * land + 5 * consHit + 9 * sylHit;
     return {
       bloom: lerp(0.75, 0.7, drain) - 0.2 * prog(t, T.there, T.there + 0.2) * (1 - prog(t, T.you, T.db1)), bloomThreshold: lerp(0.85, 0.95, drain), bloomKnee: lerp(0.5, 0.25, drain),
       vignette: lerp(0.45, 0.6, drain), grain: lerp(0.055, 0.065, drain),
@@ -411,25 +417,25 @@ export default class LeftTurn extends Scene {
   }
 
   // ---------------------------------------------------------------- overlay drawings
-  /** "PASSED" beside the checks on the planned route. */
+  /** "EVALUATED" over the cells the spark passes on the planned route. */
   drawStamps(c: CanvasRenderingContext2D, t: number) {
     const T = this.T;
     const stamp = (i: number, t0: number) => {
       if (t < t0) return;
-      const m = MAP.ms[i]!;
+      const b = cellBox(MAP.ms[i]!);
       const e = t - t0;
       const a = prog(e, 0, 0.03) * (1 - prog(e, 0.5, 0.8));
-      c.save(); c.translate(MAP.PX - 132, m.y - 70); c.rotate(-0.08);
-      c.font = font(F.mono(600), 20); c.fillStyle = rgba('signal', a); c.textAlign = 'center';
-      c.fillText('PASSED', 0, 0);
+      c.save(); c.translate(b.x0 + 4, b.y0 - 18); c.rotate(-0.06);
+      c.font = font(F.mono(600), 22); c.fillStyle = rgba('signal', a); c.textAlign = 'left';
+      c.fillText('EVALUATED', 0, 0);
       c.restore();
     };
     stamp(0, T.sharp);
-    stamp(1, T.tPDR);
+    stamp(1, T.tShrdlu);
   }
 
   /** Terra incognita, lettered along the upper rim of the unplanned object (a map label). */
-  drawTerrain(c: CanvasRenderingContext2D) {
+  drawTerrain(c: CanvasRenderingContext2D, t: number) {
     c.save();
     const fam = F.serif(400, true), size = 84;
     c.font = font(fam, size);
@@ -446,6 +452,18 @@ export default class LeftTurn extends Scene {
       c.rotate(am + Math.PI / 2);
       c.fillText(g.ch, 0, 0);
       c.restore();
+    }
+    // spot heights, surveyed once the spark has landed: no symbols on this map, only weights
+    const sa = prog(t, this.T.there, this.T.there + 0.25);
+    if (sa > 0) {
+      c.font = font(F.mono(400), 40);
+      c.textAlign = 'left';
+      c.fillStyle = rgba('ash', 0.7 * sa);
+      for (const [u, v, val] of SPOTS) {
+        const x = FACE.x + u * FACE.r, y = FACE.y + v * FACE.r;
+        c.beginPath(); c.arc(x, y, 7, 0, Math.PI * 2); c.fill();
+        c.fillText(val, x + 18, y + 14);
+      }
     }
     c.restore();
   }
@@ -526,7 +544,7 @@ export default class LeftTurn extends Scene {
       c.font = font(F.mono(600), 68); c.fillStyle = rgba('bone', 1);
       c.fillText('UNPLANNED OBJECT', lx, ly - 26);
       c.font = font(F.mono(400), 50); c.fillStyle = rgba('ash', 1);
-      c.fillText('not on roadmap', lx, ly + 66);
+      c.fillText('not on roadmap · 0 symbols', lx, ly + 66);
       c.restore();
     }
   }

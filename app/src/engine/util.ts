@@ -72,12 +72,17 @@ export function mulberry32(seed: number) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
+let OUT_FPS = 60;
+/** The export's frame rate (set by the export stream); the preview and stills stay at 60. */
+export const setOutputFps = (fps: number) => { OUT_FPS = fps > 0 ? fps : 60; };
 /**
- * Index of the 60 fps output frame nearest t, for per-frame jitter/flicker. Constant over a frame's
- * whole motion-blur shutter, so each frame shows one state (Math.floor(t * 60) switches at the frame's
- * own time, blending two states in every frame).
+ * Index of the 60 fps frame whose state the output frame nearest t shows, for per-frame jitter/flicker.
+ * Constant over a frame's whole motion-blur shutter, so each frame shows one state (Math.floor(t * 60)
+ * switches at the frame's own time, blending two states in every frame). The states stay on the 60 fps
+ * grid the video was tuned at: at 120 fps, frames 2k and 2k + 1 both show state k. (Rounding t * 60
+ * directly would put every odd 120 fps frame on a state boundary, half its sub-frames on either side.)
  */
-export const frameIdx = (t: number) => Math.round(t * 60);
+export const frameIdx = (t: number) => Math.floor((Math.round(t * OUT_FPS) * 60) / OUT_FPS + 1e-6);
 
 /** Stateless hash of integers/floats to [0,1). */
 export function hash(...xs: number[]) {

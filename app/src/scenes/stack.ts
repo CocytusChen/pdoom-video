@@ -1,7 +1,9 @@
 // FIG. 11 — "Architecture (recursive)". The bridge, part 1:
 //   “Just transformers all the way!” / Till you learned to disobey
-// An infinite vertical stack of transformer blocks drawn as technical line diagrams. The camera
-// falls through it one block per beat; the quote sits one word (group) per block. On "disobey"
+// An infinite vertical stack of transformer blocks drawn as technical line diagrams (input at the bottom,
+// as usual). The camera falls through it one block per beat, from the output down toward the input, and the
+// layer count falls with it: from L.010, it reaches L.000 (the bottom of any real model) on "way!" and keeps
+// going, into negative layers, for "Till you learned to disobey" — the stack goes on below its input (N → ∞); the quote sits one word (group) per block. On "disobey"
 // the fall stops dead, one block rotates out of alignment and the word highlights right-to-left.
 import * as THREE from 'three';
 import { Scene, type Frame } from '../engine/scene';
@@ -14,6 +16,16 @@ import { clamp, ease, hash, lerp, prog, pulse, smoothstep, springStep, TAU, fram
 import { sparkHead, sparkParticles } from './_motifs';
 import { TextPlane, beatsIn, lin, strokeLines, type RGB } from './stack-kit';
 import { PDoom, formatPDoom } from '../engine/hud';
+
+// ---- layer numbers ----
+// The top block is layer TOP_LAYER and each block down is one less: 0 lands on "way!" (block 10), the
+// negative layers start at "Till you" (block 11) and the disobeying block (13) is layer -3.
+const TOP_LAYER = 10;
+/** Layer number of block k, zero-padded, with the given minus sign (the stroke font has only the hyphen). */
+const layerName = (k: number, minus: string) => {
+  const n = TOP_LAYER - k;
+  return (n < 0 ? minus : '') + String(Math.abs(n)).padStart(3, '0');
+};
 
 // ---- block geometry (world units) ----
 const HX = 6, HY = 3, HZ = 1.4; // half extents of a block
@@ -331,7 +343,7 @@ export default class Stack extends Scene {
     label('D_MODEL 12288', 4.0, -1.0, 0.12, C_GRAPH, 1, true);
     label('HEADS 96', 4.0, -1.35, 0.12, C_GRAPH, 1, true);
     label('FFN 4×', 4.0, 0.75, 0.12, C_GRAPH, 1, true);
-    label('PRE-LN', 4.0, 1.1, 0.12, C_GRAPH, 1, true);
+    label('POST-LN', 4.0, 1.1, 0.12, C_GRAPH, 1, true); // add & norm after each sublayer, as drawn
     // registration crosses
     for (const [x, y] of [[-HX + 0.55, -HY + 0.55], [HX - 0.55, -HY + 0.55], [HX - 0.55, HY - 0.55]] as const) {
       s([x - 0.15, y, z], [x + 0.15, y, z], 0.9, C_ASH, 0.8); s([x, y - 0.15, z], [x, y + 0.15, z], 0.9, C_ASH, 0.8);
@@ -342,12 +354,12 @@ export default class Stack extends Scene {
     s([HX + 0.5, HY, 0], [HX + 0.9, HY, 0], 1, C_GRAPH, 0.9);
   }
 
-  /** Layer label segments for block index k (cached). */
+  /** Layer label segments for block index k (cached): see layerName. */
   private layerLabel(k: number): Seg[] {
     let L = this.labels.get(k);
     if (L) return L;
     L = [];
-    const text = `L.${String(k + 1).padStart(3, '0')}`;
+    const text = `L.${layerName(k, '-')}`;
     const sl = strokeLines(text, 'tech', 100);
     const capH = 0.22, kk = capH / sl.cap;
     const ox = HX + 1.1, oy = 0;
@@ -678,7 +690,7 @@ export default class Stack extends Scene {
     };
     // depth counter (top-left, mono)
     const posNow = this.pos(t);
-    const layer = Math.round(posNow) + 1;
+    const layer = layerName(Math.round(posNow), '−'); // Plex Mono has the true minus sign
     c.font = font(F.mono(500), 15);
     c.letterSpacing = '3px';
     c.fillStyle = rgba('bone', 0.55);
@@ -686,7 +698,7 @@ export default class Stack extends Scene {
     c.font = font(F.mono(400), 30);
     c.letterSpacing = '0px';
     c.fillStyle = rgba('bone', 0.9);
-    c.fillText(`L.${String(layer).padStart(3, '0')} / ${t >= this.stopT ? String(layer).padStart(3, '0') : '∞'}`, 108, 154);
+    c.fillText(`L.${layer} / ∞`, 108, 154);
     c.font = font(F.mono(400), 13);
     c.fillStyle = rgba('bone', 0.4);
     c.fillText('N × transformer block, N → ∞', 110, 178);

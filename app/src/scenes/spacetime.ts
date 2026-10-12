@@ -1,8 +1,10 @@
 // FIG. 5 `spacetime` — four movements of one idea (revision 2).
-//  I   "We had a stable training run,": the stable run as a pristine instrument. A triggered phosphor
-//      scope, the waveform almost still, the beam repainting it once per beat and writing the lyric on it.
-//      Locked-off camera, one slow, barely perceptible push; the glass graticule parallaxes over the phosphor.
-//  II  "But now the singularity's begun": on "But" the trace collapses to a point like a CRT switched off;
+//  I   "We had a stable training run,": the stable run as a pristine instrument. A phosphor scope in roll
+//      mode on the run's training loss, shaped like the published curves (the warmup's flat start, a fast
+//      drop, then a long, slow, fuzzy descent, not a spike in it). The beam is the newest step: it runs
+//      right and down the curve writing the lyric, and the camera follows it, settling on "But" where the
+//      hole will open.
+//  II  "But now the singularity's begun": on "But" the trace collapses into the beam like a CRT switched off;
 //      on the "now" beat the point becomes a black hole. The graticule is lensed around a black disk and a
 //      photon ring, "NOW" is set with the hole as its O; on the downbeat the camera plunges through it; the
 //      lyric wraps the photon ring (physically lensed, with its flipped ghost inside); "begun" bends under
@@ -10,8 +12,9 @@
 //  III "And you're optimizing, accelerating,": out of the throat of a 3D spacetime sheet; streamlines
 //      spiral into the well, faster every beat; the words orbit on a marquee ring and stretch as sung.
 //      Sweeping crane and orbit moves, a cut on the downbeat.
-//  IV  "I feel my atoms rearranging": straight down into the vortex; the lyric as atoms that detach and
-//      re-form as a paperclip drawn by the spark. Locked overhead, slow corkscrew.
+//  IV  "I feel my atoms rearranging": straight down into the vortex; the lyric is set solid, then breaks
+//      into its atoms (a sweep across each row: on "atoms", and through "rearranging"); row 1's atoms
+//      detach and re-form as a paperclip drawn by the spark. Locked overhead, slow corkscrew.
 import * as THREE from 'three';
 import { Scene, type Frame, type PostOverrides } from '../engine/scene';
 import { FSPass, Layer2D, W, H } from '../engine/gl';
@@ -32,6 +35,7 @@ type Cam = { pos: P3; tgt: P3; roll: number; fov: number };
 const GN = 20; // sheet half-size (grid lines at integers -GN..GN)
 const SIG = 9; // well falloff
 const DIV = 120; // px per graticule division at scope zoom 1
+const HOLE = { x: W / 2 - 14.4, y: H / 2 + 3.2 }; // where the loss run stops and the black hole opens (screen)
 
 const sineInOut = (x: number) => 0.5 - 0.5 * Math.cos(Math.PI * clamp(x));
 
@@ -80,6 +84,8 @@ function paperclip(n: number): V2[] {
 
 interface Stroke2 { st: StrokeText; ct: [number, number][]; x0: number; b0: number; S: number }
 interface Dot { x: number; y: number; t0: number; tx: number; ty: number; tLeave: number; tArr: number; seed: number; row: number }
+/** A row of the atoms lyric while it is still solid: where it is set, its words, and the sweep that breaks it. */
+interface SolidRow { txt: string; x0: number; y0: number; ranges: { x0: number; x1: number; w: Word }[]; xMin: number; xMax: number; s0: number; s1: number }
 interface SrcGlyph { ch: string; x: number; w: number; t0: number; t1: number }
 interface Lens { C: V2; thE: number; Rs: number; roll: number; swirl: number; gridPx: number; ring: number; heat: number; textK: number; pitch: number }
 const CLIP = { x: W / 2, y: 318, s: 455, rot: -0.2 };
@@ -108,7 +114,11 @@ export default class SpacetimeScene extends Scene {
   l1!: Line; l2!: Line; l3!: Line; l4!: Line;
   wBut!: Word; wNow!: Word; wThe!: Word; wSing!: Word; wBegun!: Word;
   tBut = 0; tNow = 0; tPlunge = 0; tDb2 = 0; tFall0 = 0; tM3 = 0;
+  headKeys: [number, number][] = [];
+  xRun0 = -15;
   tAnd = 0; tOpt = 0; tAcc = 0; tAccEnd = 0; tI = 0; tAtoms = 0; tRe = 0; tReEnd = 0;
+  solid: SolidRow[] = [];
+  famD = ''; szD = 150;
   tCutB = 0; tTop = 0;
   m2beats: number[] = [];
 
@@ -171,7 +181,20 @@ export default class SpacetimeScene extends Scene {
     {
       const st = strokeText(this.l1.words.map((w) => w.w).join(' '), 'osmotron', 100);
       const S = 0.95 / 100;
-      this.s1 = { st, ct: charTimes(this.l1.words), S, b0: 0.62, x0: (-st.width * S) / 2 };
+      const ct = charTimes(this.l1.words);
+      // set on the run so that it ends just short of the origin (the beam's last stop)
+      const x0 = -0.8 - st.width * S;
+      this.s1 = { st, ct, S, b0: 0.62, x0 };
+      this.xRun0 = x0 - 2.5;
+      // the beam keeps pace with the writing: at each letter's start it is at that letter's left edge
+      const left = st.charRange.map(() => Infinity);
+      st.strokes.forEach((pts, si) => { const ci = st.charOf[si]!; for (const q of pts) left[ci] = Math.min(left[ci]!, x0 + q.x * S); });
+      for (let i = left.length - 1; i >= 0; i--) if (left[i] === Infinity) left[i] = left[i + 1] ?? -0.8;
+      const keys: [number, number][] = [[this.T0, this.xRun0]];
+      ct.forEach(([a], i) => { if (a > keys[keys.length - 1]![0]) keys.push([a, left[i]!]); });
+      const tEnd = ct[ct.length - 1]![1];
+      keys.push([tEnd, -0.8], [Math.max(tEnd + 0.08, this.tBut), 0]);
+      this.headKeys = keys;
     }
 
     // ---- II: "BUT / NOW" with the hole as the O, "the" tucked under; the ring word; "BEGUN"
@@ -212,30 +235,40 @@ export default class SpacetimeScene extends Scene {
       acc += this.flowSpeed(t) * this.flowDt;
     }
 
-    // ---- IV: atoms. Row 1 ("I feel my atoms") re-forms as a paperclip drawn by the spark;
-    //      row 2 ("rearranging") stays legible, its atoms jittering, rearranging in place.
+    // ---- IV: atoms. Each row is set solid as it is sung, then a sweep breaks it into atoms: row 1 ("I feel
+    //      my atoms") on "atoms", and its atoms re-form as a paperclip drawn by the spark; row 2
+    //      ("rearranging") through its own word, its atoms jittering, rearranging in place.
     const famD = F.archivo(100, 900);
     const sz = 150;
+    this.famD = famD; this.szD = sz;
     const rows = [this.l4.words.slice(0, this.l4.words.indexOf(wR)), [wR]];
     const row1: Dot[] = [];
+    const sweeps: [number, number][] = [
+      [this.tAtoms + 0.05, Math.min(this.tAtoms + 0.75, this.tRe - 0.1)],
+      [this.tRe + 0.35, Math.max(this.tRe + 0.65, this.T1 - 0.25)],
+    ];
     rows.forEach((ws, ri) => {
       const txt = ws.map((w) => w.w).join(' ');
       const lay = layout(txt, famD, sz);
       const x0 = W / 2 - lay.width / 2, y0 = ri === 0 ? 575 : 575 + sz * 1.08;
       const tp = textPoints(txt, famD, sz, 6.2, 7 + ri);
+      const xs = tp.map((q) => x0 + q.x);
+      const [s0, s1] = sweeps[ri]!;
+      const row: SolidRow = { txt, x0, y0, ranges: [], xMin: Math.min(...xs), xMax: Math.max(...xs), s0, s1 };
+      this.solid.push(row);
       const ranges: { x0: number; x1: number; w: Word }[] = [];
       let ci = 0;
       ws.forEach((w) => {
         const g0 = lay.glyphs[ci]!, g1 = lay.glyphs[Math.min(lay.glyphs.length - 1, ci + w.w.length - 1)]!;
         ranges.push({ x0: g0.x, x1: g1.x + g1.w, w });
+        row.ranges.push({ x0: x0 + g0.x, x1: x0 + g1.x + g1.w, w });
         ci += w.w.length + 1;
       });
       tp.forEach((q, qi) => {
-        const r = ranges.find((z) => q.x >= z.x0 - 4 && q.x <= z.x1 + 4) ?? ranges[ranges.length - 1]!;
-        const u = clamp((q.x - r.x0) / Math.max(1, r.x1 - r.x0));
-        // "rearranging" is held past the cut into the next scene: finish setting it just before the cut
-        const wEnd = Math.min(r.w.end, this.T1 - 0.12);
-        const d: Dot = { x: x0 + q.x, y: y0 + q.y, t0: lerp(r.w.start, wEnd, u * 0.92), tx: 0, ty: 0, tLeave: Infinity, tArr: Infinity, seed: qi + ri * 10000, row: ri };
+        // an atom comes loose when the sweep reaches it
+        const u = clamp((x0 + q.x - row.xMin) / Math.max(1, row.xMax - row.xMin));
+        const seed = qi + ri * 10000;
+        const d: Dot = { x: x0 + q.x, y: y0 + q.y, t0: lerp(s0, s1, u) + (hash(seed, 9) - 0.5) * 0.06, tx: 0, ty: 0, tLeave: Infinity, tArr: Infinity, seed, row: ri };
         (ri === 0 ? row1 : this.dots).push(d);
       });
     });
@@ -261,50 +294,82 @@ export default class SpacetimeScene extends Scene {
   }
 
   // ================================================================ I: the scope
-  /** Scope camera: one slow push and a lateral drift over the whole movement (no cuts, no punches). */
-  scopeCam(t: number) {
-    const u = sineInOut(prog(t, this.T0, this.tNow));
-    return { s: 1 + 0.06 * u, dx: -18 * u, dy: 4 * u };
+  // The run's training loss in roll mode, on an unbounded graticule (divisions, y up). The beam (the spark)
+  // is the newest step: it runs right and down the curve, writing the lyric just above it, and the camera
+  // follows it. The world origin is where it stops, on "But": the CRT collapses there, and on "now" the
+  // black hole opens on that very point (so the graticule is continuous across the cut into II).
+
+  /** The beam's x (divisions): it keeps pace with the lyric it writes, then runs on to the origin. */
+  headX(t: number) {
+    const k = this.headKeys;
+    if (t <= k[0]![0]) return k[0]![1];
+    for (let i = 1; i < k.length; i++) if (t < k[i]![0]) return lerp(k[i - 1]![1], k[i]![1], (t - k[i - 1]![0]) / Math.max(1e-4, k[i]![0] - k[i - 1]![0]));
+    return k[k.length - 1]![1];
   }
-  /** Phosphor plane (divisions, y up) -> screen. Sits a hair behind the glass: slower parallax. */
+  /** The loss along the run: a power law in tokens, L ∝ (0.04 + u)^-0.35 (u: share of the shown run), as
+   *  the published pre-training curves fall, steep early (after the warmup) and then a long tail; 0 at the
+   *  origin. */
+  lossY(x: number) {
+    // before the run's start: the flat, high loss of the warmup, joined on with a rounded shoulder
+    const v = Math.min((x - this.xRun0) / -this.xRun0, 1.5);
+    const u = 0.5 * (v + Math.sqrt(v * v + 0.0009));
+    return 1.4 * (Math.pow(0.04 + u, -0.35) - Math.pow(1.04, -0.35));
+  }
+  /** Per-step fuzz on the curve, thinning out as the loss settles. No spikes. */
+  fuzz(x: number) {
+    const u = clamp((x - this.xRun0) / -this.xRun0);
+    return (0.035 * noise1(x * 9, 17) + 0.018 * noise1(x * 41, 23)) * (1.4 - u);
+  }
+  /** Camera: one slow push; it trails the beam (a short moving average, so it glides between letters),
+   *  holding it a little right of and above where the hole will open, and settling there on "But". */
+  scopeCam(t: number) {
+    const s = 1 + 0.06 * sineInOut(prog(t, this.T0, this.tNow));
+    let x = 0;
+    for (let i = 0; i < 8; i++) x += this.headX(t - (i / 7) * 0.3);
+    x /= 8;
+    const lead = 1 - sineInOut(prog(t, this.tBut - 0.9, this.tBut));
+    // at the start the beam sits on the frame's centre line, where the previous scene's flatline is
+    return { s, x, y: this.lossY(x), lx: 2.2 * DIV * lead, ly: (H / 2 - HOLE.y) * lead };
+  }
+  /** World (divisions, y up) -> screen. The hole's spot, HOLE, is where the origin lands once settled. */
   phos(t: number, x: number, y: number): V2 {
     const c = this.scopeCam(t);
     const s = DIV * c.s * 0.985;
-    return { x: W / 2 + 0.8 * c.dx + x * s, y: H / 2 + 0.8 * c.dy - y * s };
+    return { x: HOLE.x + c.lx + (x - c.x) * s, y: HOLE.y + c.ly - (y - c.y) * s };
   }
   lensCentre0(): V2 { return this.phos(this.tNow, 0, 0); }
-  /** 0 → 1: the CRT collapse on "But" (horizontal squeeze to a point). */
+  /** 0 → 1: the CRT collapse on "But" (squeezed into the beam). */
   squeeze(t: number) { return prog(t, this.tBut + 0.03, this.tNow, ease.inCubic); }
-  /** Triggered waveform (divisions): nearly still, drifting 1/16 wavelength per beat. */
+  /** How much of the trace stands up (0 → 1): it rises from the flatline, and drops back on "But". */
   traceAmp(t: number) {
     const on = prog(t, this.T0 + 0.05, this.T0 + 1.2, ease.inOutCubic);
-    return 0.5 * on * (1 - prog(t, this.tBut - 0.02, this.tBut + 0.16, ease.outCubic));
+    return on * (1 - prog(t, this.tBut - 0.02, this.tBut + 0.16, ease.outCubic));
   }
-  traceY(x: number, t: number) {
-    const ph = -TAU * this.ctx.audio.beatAt(t) / 16;
-    return this.traceAmp(t) * Math.sin((TAU / 4) * x + ph) * (1 + 0.04 * Math.sin((TAU / 4) * 3 * x + 2 * ph));
+  /** A point of the trace as drawn at t: flattened through the beam while it rises and falls, squeezed into
+   *  the beam on the collapse. */
+  traceAt(t: number, x: number, y: number): V2 {
+    const hx = this.headX(t), hy = this.lossY(hx);
+    const amp = this.traceAmp(t), sq = this.squeeze(t);
+    return this.phos(t, hx + (x - hx) * (1 - sq), hy + (y - hy) * amp * (1 - sq));
   }
-  beamX(f: Frame) { return -8.3 + 16.6 * f.beatPhase; }
+  headScreen(t: number): V2 { const hx = this.headX(t); return this.phos(t, hx, this.lossY(hx)); }
 
-  drawScope(t: number, f: Frame, L: LineBatch) {
+  drawScope(t: number, L: LineBatch) {
     if (t >= this.tNow + 0.02) return;
     const sg = LIN.signal, em = LIN.ember;
     const sq = this.squeeze(t);
-    const hx = 1 - sq;
     const bright = 1 + 3 * sq * sq;
     const on = prog(t, this.T0 - 0.01, this.T0 + 0.02);
     const ign = 1 - prog(t, this.T0, this.T0 + 0.55, ease.outCubic); // the handoff flatline, still white-hot
-    const beamX = this.beamX(f) * hx;
-    const N = 560;
+    const hx = this.headX(t);
+    // the run so far, newest at the beam; what is off-screen to the left is not drawn
+    const N = 600, span = 22;
     let prev: V2 | null = null;
     for (let i = 0; i <= N; i++) {
-      const u = (i / N) * 2 - 1;
-      const x = 9 * u;
-      const p = this.phos(t, x * hx, this.traceY(x, t));
+      const x = hx - span + (span * i) / N;
+      const p = this.traceAt(t, x, this.lossY(x) + this.fuzz(x));
       if (prev) {
-        let d = beamX - x * hx;
-        if (d < 0) d += 16.6 * hx + 1e-3;
-        const glow = lerp(Math.exp(-d / 2.6), 1, ign);
+        const glow = lerp(Math.exp(-(hx - x) / 2.6), 1, ign);
         const I = (0.42 + 2.9 * glow) * on * bright;
         // hot core + a wide soft halo (the phosphor's bloom)
         const wh = 0.45 * ign;
@@ -313,37 +378,29 @@ export default class SpacetimeScene extends Scene {
       }
       prev = p;
     }
-    // long persistence: the last sweeps linger, each drifted a sixteenth of a wavelength
-    const beatNow = this.ctx.audio.beatAt(t), amp = this.traceAmp(t);
-    for (let k = 1; k <= 3; k++) {
-      const Ik = 0.16 * Math.pow(0.5, k - 1) * on * (1 - ign) * (1 - sq);
-      if (Ik <= 0.002 || amp <= 0.01) continue;
-      const ph = -TAU * (beatNow - k) / 16;
-      let q: V2 | null = null;
-      for (let i = 0; i <= 280; i++) {
-        const x = -9 + (18 * i) / 280;
-        const p = this.phos(t, x * hx, amp * Math.sin((TAU / 4) * x + ph));
-        if (q) L.seg2(q.x, q.y, p.x, p.y, 1.6, [sg[0] * Ik, sg[1] * Ik, sg[2] * Ik], 1);
-        q = p;
-      }
+    // the handoff: the previous scene's flatline still runs on to the right edge, cooling as the run starts
+    if (ign > 0.01 && prev) {
+      const I = (0.42 + 2.9) * on * ign;
+      L.seg2(prev.x, prev.y, W + 20, prev.y, 2.6, [1.6 * I * 1.35, 1.1 * I * 1.2, 0.8 * I * 1.05], 1);
+      L.seg2(prev.x, prev.y, W + 20, prev.y, 40, [sg[0] * 0.12 * I, sg[1] * 0.12 * I, sg[2] * 0.12 * I], 1);
     }
-    // CH2 (P(doom)): a flat, dim, muted trace nobody is watching
+    // CH2 (P(doom)): a flat, dim, muted trace nobody is watching, low on the glass
     const ch2 = prog(t, this.T0 + 0.3, this.T0 + 0.9) * (1 - sq);
     if (ch2 > 0) {
       const gr = LIN.ash;
+      const s = DIV * this.scopeCam(t).s;
       let q: V2 | null = null;
       for (let i = 0; i <= 160; i++) {
-        const x = -9 + (18 * i) / 160;
-        const y = -3.1 + 0.012 * noise1(x * 3 + t * 9, 31) + 0.02 * this.pd.value(t);
-        const p = this.phos(t, x * hx, y * (1 - sq));
+        const sx = (W * i) / 160;
+        const p = { x: sx, y: H / 2 + 3.1 * s - (0.012 * noise1(sx / s * 3 + t * 9, 31) + 0.02 * this.pd.value(t)) * s };
         if (q) L.seg2(q.x, q.y, p.x, p.y, 1.4, [gr[0] * 0.32 * ch2, gr[1] * 0.3 * ch2, gr[2] * 0.28 * ch2], 1);
         q = p;
       }
     }
-    // line 1, written by the beam and riding the wave; it is swallowed by the collapse
+    // line 1, written by the beam just above the curve, riding it; it is swallowed by the collapse
     const a1 = prog(t, this.T0, this.T0 + 0.1);
-    const vy = 1 - sq;
-    this.drawStroke2(this.s1, t, a1 * (1 + 1.5 * sq), (a, b) => this.phos(t, a * hx, (b + 0.75 * this.traceY(a, t)) * vy), 2.6, L);
+    const keep = (1 - prog(t, this.tBut - 0.02, this.tBut + 0.16, ease.outCubic)) * (1 - sq); // flattened on "But"
+    this.drawStroke2(this.s1, t, a1 * (1 + 1.5 * sq), (a, b) => this.phos(t, hx + (a - hx) * (1 - sq), this.lossY(hx) + (b + this.lossY(a) - this.lossY(hx)) * keep), 2.6, L);
   }
 
   drawStroke2(S: Stroke2, t: number, alpha: number, map: (a: number, b: number) => V2, width: number, L: LineBatch) {
@@ -388,15 +445,15 @@ export default class SpacetimeScene extends Scene {
     c.font = font(F.mono(500), 17);
     c.letterSpacing = '2px';
     c.textBaseline = 'alphabetic';
-    const bpm = this.ctx.audio.bpm;
-    const hz = bpm / 60;
     const but = prog(t, this.tBut, this.tBut + 0.05);
     const blink = Math.floor(t * 8) % 2 === 0;
     c.fillStyle = rgba('bone', 0.75 * a);
     c.textAlign = 'left';
-    c.fillText('CH1  0.2 V/div  DC', 96, 92);
+    c.fillText('CH1  train/loss  ROLL', 96, 92);
     c.fillStyle = rgba('ash', 0.8 * a);
-    c.fillText(`f = ${but > 0 ? '→ ∞' : hz.toFixed(3)} Hz`, 96, 120);
+    // tokens seen, ticking up with the run (and off the scale on "But")
+    const tok = 14.2 + 0.3 * prog(t, this.T0, this.tBut);
+    c.fillText(`tokens ${but > 0 ? '→ ∞' : `${tok.toFixed(2)}T`}`, 96, 120);
     c.fillStyle = rgba('bone', 0.75 * a);
     c.fillText('CH2  P(doom)', 96, 160);
     c.fillStyle = rgba('signal', 0.95 * a);
@@ -405,7 +462,7 @@ export default class SpacetimeScene extends Scene {
     c.fillText('(muted)', 96, 188);
     c.textAlign = 'right';
     c.fillStyle = rgba('bone', 0.75 * a);
-    c.fillText(`M  ${(60000 / bpm / 4).toFixed(1)} ms/div`, W - 96, 92);
+    c.fillText('M  1T tok/div', W - 96, 92);
     const trig = but > 0 ? (blink ? 'NO SIGNAL' : '') : "TRIG'D    CH1";
     c.fillStyle = but > 0 ? rgba('signal', a) : rgba('ash', 0.8 * a);
     c.fillText(trig, W - 96, 120);
@@ -415,11 +472,11 @@ export default class SpacetimeScene extends Scene {
       const tx = W - 96 - c.measureText(' CH1').width - cell + (cell - 2) / 2;
       c.beginPath(); c.moveTo(tx - 5.2, 120); c.lineTo(tx + 5.2, 120); c.lineTo(tx, 120 - 9.4); c.closePath(); c.fill();
     }
-    // the run's own vital sign, calm, ticking down
+    // the run's own vital signs, calm, the way the reports put it
     if (but <= 0) {
-      const loss = 0.0213 - 0.0009 * prog(t, this.T0, this.tBut);
+      const loss = 1.742 - 0.004 * prog(t, this.T0, this.tBut);
       c.fillStyle = rgba('ash', 0.7 * a);
-      c.fillText(`loss ${loss.toFixed(4)}  ·  stable`, W - 96, 148);
+      c.fillText(`loss ${loss.toFixed(3)}  ·  0 loss spikes  ·  0 rollbacks`, W - 96, 148);
     }
     c.restore();
   }
@@ -608,18 +665,17 @@ export default class SpacetimeScene extends Scene {
   }
 
   /** Screen position and strength of the beam, for the glass it lights. */
-  beamLight(t: number, f: Frame): [number, number, number] {
+  beamLight(t: number): [number, number, number] {
     if (t >= this.tNow) return [0, 0, 0];
     const sq = this.squeeze(t);
-    const p = this.phos(t, this.beamX(f) * (1 - sq), this.traceY(this.beamX(f), t) * (1 - sq));
+    const p = this.headScreen(t);
     return [p.x, p.y, 0.8 * prog(t, this.T0 + 0.3, this.T0 + 0.8) * (1 + 2 * sq * sq)];
   }
 
-  drawBeam(t: number, f: Frame, L: LineBatch) {
+  drawBeam(t: number, L: LineBatch) {
     if (t >= this.tNow + 0.05) return;
     const sq = this.squeeze(t);
-    const bx = this.beamX(f) * (1 - sq);
-    const p = this.phos(t, bx, this.traceY(this.beamX(f), t) * (1 - sq));
+    const p = this.headScreen(t);
     const flare = 1 + 2.5 * sq * sq;
     sparkHead(L, p.x, p.y, t, 0.85 * (1 + 0.6 * sq), prog(t, this.T0, this.T0 + 0.05) * flare * (1 - prog(t, this.tNow, this.tNow + 0.05)));
   }
@@ -628,29 +684,28 @@ export default class SpacetimeScene extends Scene {
     const { renderer } = this.ctx;
     const t = f.t;
     const ln = this.lensAt(t, f);
-    const sc = this.scopeCam(t);
     // source plane: the lyric of movement II
     this.src.clear();
     this.drawSource(t, this.src.ctx, ln);
     this.src.upload();
     const m1 = t < this.tNow;
-    const glassC: V2 = m1 ? { x: W / 2 + sc.dx, y: H / 2 + sc.dy } : ln.C;
+    const glassC: V2 = m1 ? this.phos(t, 0, 0) : ln.C; // the graticule is the run's own: its origin is the hole's spot
     this.lens.set({
       C: [ln.C.x, ln.C.y], Rs: ln.Rs, thE: ln.thE, swirl: ln.swirl, pitch: ln.pitch, F: 1400,
       gridOff: [glassC.x - ln.C.x, -(glassC.y - ln.C.y)], gridPx: ln.gridPx, gridRot: m1 ? 0 : -ln.roll,
-      gridExt: m1 ? [8, 4.5] : [lerp(8, 30, prog(t, this.tNow, this.tPlunge)), lerp(4.5, 30, prog(t, this.tNow, this.tPlunge))],
-      gridA: m1 ? 0.62 : 1 + 0.6 * pulse(t, this.tNow, 0.2), gridDraw: prog(t, this.T0, this.T0 + 0.5, ease.outExpo),
+      gridExt: [60, 40],
+      gridA: m1 ? 0.62 * prog(t, this.T0, this.T0 + 0.5) : 1 + 0.6 * pulse(t, this.tNow, 0.2), gridDraw: 1,
       ticks: m1 ? 1 : 1 - prog(t, this.tNow, this.tPlunge), minor: prog(t, this.tPlunge - 0.1, this.tPlunge + 0.3),
       texA: 1, ring: ln.ring, ringPh: -1.2 + 2.2 * (t - this.tNow) + ln.roll, glow: m1 ? prog(t, this.T0 + 0.1, this.T0 + 0.8) : 0.3, kick: f.a.kick, heat: ln.heat, time: t,
       line: m1 ? 1.25 : 1.35,
-      beam: this.beamLight(t, f),
+      beam: this.beamLight(t),
     });
     this.lens.render(renderer, out);
 
     const L2 = this.L2; L2.clear();
-    this.drawScope(t, f, L2);
+    this.drawScope(t, L2);
     this.drawInfall(t, L2, ln);
-    this.drawBeam(t, f, L2);
+    this.drawBeam(t, L2);
     L2.render(renderer, out);
 
     const T = this.text; T.clear();
@@ -746,6 +801,7 @@ export default class SpacetimeScene extends Scene {
     L.render(renderer, out, this.cam);
     const T = this.text; T.clear();
     this.drawRing(t, T.ctx, K, e);
+    this.drawSolid(t, T.ctx);
     this.ctx.comp.draw(renderer, T.upload(), out);
     const L2 = this.L2; L2.clear();
     this.drawAtoms(t, L2);
@@ -899,13 +955,42 @@ export default class SpacetimeScene extends Scene {
     c.restore();
   }
 
+  /** The atoms lyric while it is still solid: each word set as it is sung (hot, then cooling), cut away
+   *  behind the sweep that turns it into atoms. "rearranging" waits as a faint ghost before it is sung. */
+  drawSolid(t: number, c: CanvasRenderingContext2D) {
+    if (t < this.tI - 0.3) return;
+    c.save();
+    c.font = font(this.famD, this.szD);
+    c.textBaseline = 'alphabetic';
+    for (const row of this.solid) {
+      const sx = lerp(row.xMin, row.xMax, prog(t, row.s0, row.s1));
+      if (t >= row.s1) continue;
+      for (const r of row.ranges) {
+        const w = r.w;
+        const k = prog(t, w.start - 0.03, w.start + 0.08, ease.outCubic);
+        const ghost = r.w === this.l4.words[this.l4.words.length - 1] ? 0.22 * prog(t, this.tRe - 0.45, this.tRe - 0.1) : 0;
+        if (k <= 0 && ghost <= 0) continue;
+        const x0 = Math.max(r.x0 - 6, t >= row.s0 ? sx : -Infinity), x1 = r.x1 + 6;
+        if (x1 <= x0) continue;
+        c.save();
+        c.beginPath(); c.rect(x0, row.y0 - this.szD, x1 - x0, this.szD * 1.4); c.clip();
+        const cool = prog(t, w.end, w.end + 0.25);
+        const hot = k > 0 && t < w.end + 0.25 ? 1 - cool : 0;
+        c.fillStyle = k > 0 ? (hot > 0.02 ? mixRgba('bone', 'signal', hot, 0.95) : rgba('bone', 0.95)) : rgba('bone', ghost);
+        c.fillText(row.txt, row.x0, row.y0 + (1 - Math.max(k, ghost > 0 ? 1 : 0)) * 8);
+        c.restore();
+      }
+    }
+    c.restore();
+  }
+
   drawAtoms(t: number, L: LineBatch) {
     if (t < this.tI - 0.3) return;
     const cx = W / 2, cy = H / 2;
     const bone = LIN.bone, sg = LIN.signal, em = LIN.ember;
     for (const d of this.dots) {
       const ap = prog(t, d.t0 - 0.04, d.t0 + 0.1, ease.outCubic);
-      const ghost = d.row === 1 ? 0.22 * prog(t, this.tRe - 0.45, this.tRe - 0.1) : 0;
+      const ghost = 0; // the unsung "rearranging" is a solid ghost now (drawSolid)
       if (ap <= 0 && ghost <= 0) continue;
       let x = d.x, y = d.y;
       let heat = Math.exp(-(t - d.t0) / 0.25) * 0.9 * (ap > 0 ? 1 : 0);
@@ -965,6 +1050,11 @@ export default class SpacetimeScene extends Scene {
   override render(f: Frame, out: THREE.WebGLRenderTarget): PostOverrides {
     return f.t < this.tM3 ? this.renderLens(f, out) : this.renderSheet(f, out);
   }
+}
+
+function mixRgba(a: string, b: string, k: number, alpha: number) {
+  const pa = rgba(a).match(/\d+/g)!.map(Number), pb = rgba(b).match(/\d+/g)!.map(Number);
+  return `rgba(${[0, 1, 2].map((i) => Math.round(pa[i]! + (pb[i]! - pa[i]!) * k)).join(',')},${alpha})`;
 }
 
 const kernCache = new Map<string, number>();

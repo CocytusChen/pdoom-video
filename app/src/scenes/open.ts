@@ -5,9 +5,11 @@
 // construction lines, dimension callouts and tiny Plex Mono TikZ annotations. The lyric is a Swiss
 // text column beside the figure, set big in Archivo: the pickup "I" is literally drawn as a TikZ
 // rectangle; the horn lands on "AGI" as a streak of sparks; on "eyes" a snap-zoom onto the eye, a
-// perfect dot, r = 0.08. "Your circuits make me nervous,": the strokes re-route into PCB traces with
-// vias while the drawing trains (ckpt 1 → 2 → 3, the middle one with five legs), and a tremor hits
-// on "nervous". "that's no surprise": surprisal −log p = 0.00 nats; the sheet cools to black and the
+// perfect dot, r = 0.08. "Your circuits make me nervous,": circuits in the interpretability sense. The
+// drawing fades to a ghost and its parts become feature nodes of an attribution graph, one layer per
+// row (legs low, horn high): the prompt's tokens at the bottom, the next token " horn" at the top,
+// weighted edges carrying the signal up, while the drawing trains (ckpt 1 → 2 → 3, the middle one
+// with five legs, and a fifth leg feature), and a tremor hits on "nervous". "that's no surprise": surprisal −log p = 0.00 nats; the sheet cools to black and the
 // pen slides down to where `loss` starts its curve.
 import * as THREE from 'three';
 import { Scene, type Frame, type PostOverrides } from '../engine/scene';
@@ -19,7 +21,7 @@ import { strokeText } from '../engine/stroke';
 import { Lyrics, norm, type Line, type Word } from '../engine/lyrics';
 import { sparkHead, sparkParticles } from './_motifs';
 import { clamp, lerp, ease, prog, pulse, noise1, noise3, hash, TAU } from '../engine/util';
-import { type P, type Part, pt, ellipse, arc, rect, poly, lengths, at, unicorn, octilinear, offset, mix, EYE } from './open-geo';
+import { type P, type Part, pt, ellipse, arc, rect, poly, lengths, at, unicorn, mix, centroid, EYE } from './open-geo';
 
 type RGB = [number, number, number];
 type Kind = 'axis' | 'cons' | 'prim' | 'dim' | 'hatch' | 'plot' | 'eye' | 'ghost' | 'ring';
@@ -511,9 +513,12 @@ export default class OpenScene extends Scene {
     this.plotText('r = 0.08', p1.x + 0.06, p1.y + 0.05, 0.155, te + 0.3, te + 0.54, 'eyec');
     this.note('\\fill (2.95,2) circle (0.08); % eye', p1.x + 0.06, p1.y - 0.1, te + 0.44, { em: 0.045, col: 'ash', group: 'eyec', maxPx: 99 });
 
-    // ---- circuits: the pen rides the router, then ticks the checkpoints
-    const route = octilinear(part('body'), 0.24, 0.08, true);
-    S(route, this.tCirc + 0.02, this.tCirc + 0.3, 'ghost', { pen: true, alpha: 0, ez: ez.inOutQuad });
+    // ---- circuits: the pen rides the graph up from " unicorn" to " horn", then ticks the checkpoints
+    {
+      const g = this.graph(this.tCirc);
+      const route = ['tok2', 'leg1', 'body', 'neck', 'head', 'horn', 'out'].map((id) => { const n = g.nodes.get(id)!; return pt(n.x, n.y); });
+      S(route, this.tCirc + 0.02, this.tCirc + 0.3, 'ghost', { pen: true, alpha: 0, ez: ez.inOutQuad });
+    }
     const tbl = this.tablePos();
     S([pt(tbl.x - 0.05, tbl.y - 0.52), pt(tbl.x + 2.9, tbl.y - 0.52)], this.tCk2, this.tCk2 + 0.1, 'plot', { pen: true, width: 1.1, group: 'table' });
     S([pt(tbl.x - 0.05, tbl.y - 0.78), pt(tbl.x + 2.9, tbl.y - 0.78)], this.tCk3, this.tCk3 + 0.1, 'plot', { pen: true, width: 1.1, group: 'table' });
@@ -598,22 +603,22 @@ export default class OpenScene extends Scene {
   exitK(t: number) { return prog(t, this.tExit, this.T1 - 0.12, ease.inQuad); }
   groupAlpha(g: string, t: number): number {
     const exit = 1 - this.exitK(t);
-    const pcb = prog(t, this.tCirc, this.tCirc + 0.4);
+    const graph = prog(t, this.tCirc, this.tCirc + 0.4);
     const late = prog(t, this.B(8), this.B(11));
     switch (g) {
-      case 'u1': return exit * (1 - 0.8 * pcb) * (1 - 0.55 * prog(t, this.tCk3 - 0.05, this.tCk3 + 0.2)) * (1 - prog(t, this.w.thats!.start - 0.1, this.w.thats!.start + 0.5));
-      case 'u1h': return exit * (1 - pcb);
-      case 'cons': return exit * (1 - 0.5 * late) * (1 - 0.7 * pcb);
-      case 'axes': return exit * (1 - 0.35 * late) * (1 - 0.72 * pcb) * (1 - 0.5 * prog(t, this.w.thats!.start, this.w.thats!.start + 0.4));
+      case 'u1': return exit * (1 - 0.8 * graph) * (1 - 0.55 * prog(t, this.tCk3 - 0.05, this.tCk3 + 0.2)) * (1 - prog(t, this.w.thats!.start - 0.1, this.w.thats!.start + 0.5));
+      case 'u1h': return exit * (1 - graph);
+      case 'cons': return exit * (1 - 0.5 * late) * (1 - 0.7 * graph);
+      case 'axes': return exit * (1 - 0.35 * late) * (1 - 0.72 * graph) * (1 - 0.5 * prog(t, this.w.thats!.start, this.w.thats!.start + 0.4));
       case 'dims': return exit * (1 - 0.8 * prog(t, this.B(5), this.B(7)));
       case 'lyricI': return exit * (1 - 0.85 * prog(t, this.B(4), this.B(5)));
-      case 'code': return exit * (1 - 0.8 * pcb);
-      case 'code2': return exit * (1 - pcb);
+      case 'code': return exit * (1 - 0.8 * graph);
+      case 'code2': return exit * (1 - graph);
       case 'prompt': return exit * (1 - prog(t, this.B(4) - 0.1, this.B(4) + 0.25));
-      case 'dial': return exit * (1 - 0.75 * prog(t, this.B(4), this.B(6))) * (1 - pcb);
+      case 'dial': return exit * (1 - 0.75 * prog(t, this.B(4), this.B(6))) * (1 - graph);
       case 'type': return exit * lerp(1, 0.25, prog(t, this.B(4), this.B(6))) * (1 - prog(t, this.w.Your!.start, this.w.Your!.start + 0.3));
       case 'ring': return 1;
-      case 'listing': return exit * (1 - 0.85 * pcb) * (1 - prog(t, this.w.thats!.start - 0.1, this.w.thats!.start + 0.3));
+      case 'listing': return exit * (1 - 0.85 * graph) * (1 - prog(t, this.w.thats!.start - 0.1, this.w.thats!.start + 0.3));
       case 'typel': return exit * (1 - prog(t, this.B(4), this.B(5)));
       case 'title': return exit * (1 - prog(t, this.w.in!.start, this.w.Your!.start));
       case 'rays': return exit * (1 - prog(t, this.B(2), this.B(4)));
@@ -658,13 +663,14 @@ export default class OpenScene extends Scene {
     const L = this.lines; L.clear();
     this.drawStrokes(t, c, L, jit);
     this.drawCompassArm(t, L, jit, pw);
-    this.drawPCB(t, c, L, jit);
+    this.drawGraph(t, L, jit);
     L.render(renderer, out);
 
     // ---- type
     const T = this.text; T.clear();
     this.drawNotes(t, c, T.ctx, trem);
     this.drawTable(t, c, T.ctx, trem);
+    this.drawGraphText(t, c, T.ctx, trem);
     this.drawLyrics(t, c, T.ctx, trem);
     this.drawSurprisal(t, c, T.ctx);
     comp.draw(renderer, T.upload(), out);
@@ -835,96 +841,149 @@ export default class OpenScene extends Scene {
     }
   }
 
-  // ---------------------------------------------------------------- PCB phase
-  /** The unicorn at time t (ckpt 1 → 2 → 3) and how refined (silhouette-only) it is. */
-  geometry(t: number): { parts: Part[]; refine: number } {
+  // ---------------------------------------------------------------- circuits: the attribution graph
+  /** The unicorn at time t (ckpt 1 → 2 → 3). */
+  geometry(t: number): Part[] {
     const k2 = ease.inOutCubic(prog(t, this.tCk2 - 0.03, this.tCk2 + 0.14));
     const k3 = ease.inOutCubic(prog(t, this.tCk3 - 0.03, this.tCk3 + 0.14));
-    const parts = this.u1.map((p, i) => {
+    return this.u1.map((p, i) => {
       const a = k2 > 0 ? mix(p.pts, this.u2[i]!.pts, k2) : p.pts;
       return { id: p.id, closed: p.closed, pts: k3 > 0 ? mix(a, this.u3[i]!.pts, k3) : a };
     });
-    return { parts, refine: clamp(0.45 * k2 + 0.55 * k3) };
   }
 
-  drawPCB(t: number, c: Cam, L: LineBatch, jit: (x: number, y: number) => [number, number]) {
+  /**
+   * The graph at time t: one feature node per part of the unicorn (manes and tails merged), at the part's
+   * centroid but on its layer's row, so the silhouette survives in steps; the prompt's tokens below, the
+   * next token above. The fifth leg exists only around checkpoint 2.
+   */
+  graph(t: number) {
+    const parts = this.geometry(t);
+    const cen = (ids: string[]) => centroid(parts.filter((p) => ids.includes(p.id)).flatMap((p) => p.pts));
+    const nodes = new Map<string, GNode>();
+    const feat = (id: string, ids: string[], layer: number, label: string, a = 1) => {
+      nodes.set(id, { x: cen(ids).x, y: G_ROWS[layer]!, layer, label, a, tok: false });
+    };
+    const k2in = prog(t, this.tCk2 - 0.03, this.tCk2 + 0.1), k3 = prog(t, this.tCk3 - 0.03, this.tCk3 + 0.14);
+    for (let i = 0; i < 5; i++) feat(`leg${i}`, [`leg${i}`], 1, '', i === 4 ? k2in * (1 - k3) : 1);
+    feat('tail', ['tail0', 'tail1', 'tail2'], 2, 'tail');
+    feat('body', ['body'], 3, 'body');
+    feat('neck', ['neck'], 4, 'neck');
+    feat('mane', ['mane0', 'mane1', 'mane2'], 4, 'mane');
+    feat('head', ['head'], 5, 'head');
+    feat('ear', ['ear'], 6, 'ear');
+    feat('horn', ['horn'], 6, 'horn');
+    // the mane sits left of the neck: keep the two apart on their shared row (and the ear off the horn)
+    const nk = nodes.get('neck')!, mn = nodes.get('mane')!;
+    if (nk.x - mn.x < 0.5) mn.x = nk.x - 0.5;
+    const hn = nodes.get('horn')!, er = nodes.get('ear')!;
+    if (hn.x - er.x < 0.5) er.x = hn.x - 0.5;
+    // the prompt's tokens, left to right under the legs
+    let x = G_TOK.x;
+    G_TOKS.forEach((s, i) => {
+      const w = s.length * G_TOK.em * 0.6;
+      nodes.set(`tok${i}`, { x: x + w / 2, y: G_ROWS[0]!, layer: 0, label: s, a: 1, tok: true });
+      x += w + 0.12;
+    });
+    nodes.set('out', { x: G_OUT.x, y: G_ROWS[7]!, layer: 7, label: 'horn', a: 1, tok: true });
+    // routes, drawn like the transformer-circuit figures: vertical out of the source's top, one
+    // horizontal run in a lane under the target, vertical into its bottom; parallel wires keep apart
+    const es = this.edges();
+    const outs = new Map<string, number[]>(), ins = new Map<string, number[]>();
+    es.forEach(([ia, ib], i) => { (outs.get(ia) ?? outs.set(ia, []).get(ia)!).push(i); (ins.get(ib) ?? ins.set(ib, []).get(ib)!).push(i); });
+    const LANE = 0.045;
+    const lane = (m: Map<string, number[]>, id: string, i: number, other: (e: number) => number) => {
+      const l = [...m.get(id)!].sort((a, b) => other(a) - other(b));
+      return { k: l.indexOf(i), n: l.length };
+    };
+    // where wires meet a box: feature squares, or the chips (top at +0.5 em, bottom at -0.62 em)
+    const top = (id: string) => (nodes.get(id)!.tok ? G_TOK.em * 0.5 : G_BOX / 2);
+    const bottom = (id: string) => (nodes.get(id)!.tok ? G_TOK.em * 0.62 : G_BOX / 2);
+    const routes = es.map(([ia, ib, wt], i) => {
+      const A = nodes.get(ia)!, Bn = nodes.get(ib)!;
+      const lo = lane(outs, ia, i, (e) => nodes.get(es[e]![1])!.x), li = lane(ins, ib, i, (e) => nodes.get(es[e]![0])!.x);
+      const x0 = A.x + (lo.k - (lo.n - 1) / 2) * LANE * (A.tok ? 0.7 : 1), y0 = A.y + top(ia);
+      const x1 = Bn.x + (li.k - (li.n - 1) / 2) * LANE, y1 = Bn.y - bottom(ib);
+      let ym = y1 - 0.12 - LANE * (li.n - 1 - li.k);
+      if (ym < y0 + 0.08) ym = (y0 + y1) / 2;
+      return { ia, ib, wt, pts: ortho(x0, y0, x1, y1, ym), mid: pt((x0 + x1) / 2, ym) };
+    });
+    return { nodes, routes };
+  }
+
+  drawGraph(t: number, L: LineBatch, jit: (x: number, y: number) => [number, number]) {
     if (t < this.tCirc - 0.02) return;
     const exit = 1 - this.exitK(t);
     if (exit <= 0) return;
-    const { parts, refine } = this.geometry(t);
-    const order = ['body', 'neck', 'head', 'horn', 'ear', 'mane0', 'mane1', 'mane2', 'leg2', 'leg3', 'leg1', 'leg0', 'leg4', 'tail0', 'tail1', 'tail2'];
-    const closed = parts.filter((p) => p.closed);
-    const inside = (x: number, y: number, self: string) => {
-      for (const q of closed) if (q.id !== self && pointInPoly(x, y, q.pts)) return true;
-      return false;
-    };
-    const sig = LIN.signal, emb = LIN.ember, bone = LIN.bone;
-    const settle = prog(t, this.w.thats!.start - 0.1, this.w.thats!.start + 0.6, ease.inOutCubic); // traces cool to bone
-    const k2in = prog(t, this.tCk2 - 0.03, this.tCk2 + 0.1);
-    for (const part of parts) {
-      if (part.id === 'leg4' && k2in <= 0) continue;
-      const oi = Math.max(0, order.indexOf(part.id));
-      const tr0 = this.tCirc + 0.02 + oi * 0.02;
-      const kr = ease.outCubic(prog(t, tr0, tr0 + 0.3));
-      if (kr <= 0) continue;
-      const base = octilinear(part.pts, 0.24, 0.08, part.closed);
-      const tracks = part.id.startsWith('leg') || part.id === 'ear' || part.id === 'horn' ? [0, -0.06] : [0, -0.075, 0.075];
-      tracks.forEach((off, ti) => {
-        const path = off === 0 ? base : offset(base, off, part.closed);
-        const Lp = lengths(path);
-        const head = kr * Lp[Lp.length - 1]!;
-        let prev: [number, number] | null = null;
-        for (let i = 0; i < path.length; i++) {
-          let p = path[i]!;
-          let stop = false;
-          if (Lp[i]! > head) {
-            if (i === 0) break;
-            const q = at(path, Lp, head); p = pt(q.x, q.y); stop = true;
-          }
-          const cur = jit(p.x, p.y);
-          if (prev) {
-            const a = path[i - 1]!;
-            const hid = refine > 0.02 && part.closed && inside((a.x + p.x) / 2, (a.y + p.y) / 2, part.id);
-            const vis = hid ? 1 - refine : 1;
-            if (vis > 0.01) {
-              const front = kr < 1 ? Math.exp(-Math.max(0, head - Lp[i]!) / 0.3) : 0;
-              const warm = (1 - settle) * (ti === 0 ? 1 : 0.6);
-              const col: RGB = [
-                lerp(bone[0] * 0.72, sig[0] * 0.95, warm) + emb[0] * 3 * front,
-                lerp(bone[1] * 0.72, sig[1] * 0.95, warm) + emb[1] * 3 * front,
-                lerp(bone[2] * 0.72, sig[2] * 0.95, warm) + emb[2] * 3 * front,
-              ];
-              L.seg2(prev[0], prev[1], cur[0], cur[1], ti === 0 ? 1.6 : 1.0, col, (ti === 0 ? 0.95 : 0.55) * vis * exit);
-            }
-          }
-          prev = cur;
-          if (stop) break;
-        }
-        if (kr >= 1 && ti === 0) {
-          const ends = part.closed ? [path[0]!] : [path[0]!, path[path.length - 1]!];
-          for (const e of ends) {
-            if (part.closed && refine > 0.5 && inside(e.x, e.y, part.id)) continue;
-            this.via(L, jit, c, e.x, e.y, 0.055, exit);
-          }
-        }
-      });
+    const { nodes, routes } = this.graph(t);
+    const sig = LIN.signal, emb = LIN.ember, bone = LIN.bone, ash = LIN.ash;
+    const settle = prog(t, this.w.thats!.start - 0.1, this.w.thats!.start + 0.6, ease.inOutCubic); // cools to bone
+    const grow = (layer: number) => this.tCirc + 0.04 + layer * 0.045;
+    // layer rows: faint dashed guides
+    const rowsA = 0.16 * exit * prog(t, this.tCirc, this.tCirc + 0.2);
+    for (let r = 1; r <= 6; r++) {
+      const y = G_ROWS[r]!;
+      for (let x = G_X0; x < G_X1; x += 0.16) {
+        const a = jit(x, y), b = jit(Math.min(G_X1, x + 0.08), y);
+        L.seg2(a[0], a[1], b[0], b[1], 1, [bone[0], bone[1], bone[2]], rowsA);
+      }
     }
-    // current: pulses running along the traces on the 8ths
+    // edges: square wires, width by |weight|; negative weights dashed and cold
+    for (const { ia, ib, wt, pts } of routes) {
+      const A = nodes.get(ia)!, Bn = nodes.get(ib)!;
+      const vis = Math.min(A.a, Bn.a) * exit;
+      if (vis <= 0.01) continue;
+      const t0 = grow(A.layer);
+      const kg = ease.outCubic(prog(t, t0, t0 + 0.2));
+      if (kg <= 0) continue;
+      const warm = (1 - settle) * (wt > 0 ? 1 : 0);
+      const col: RGB = wt > 0
+        ? [lerp(bone[0] * 0.7, sig[0] * 0.95, warm), lerp(bone[1] * 0.7, sig[1] * 0.95, warm), lerp(bone[2] * 0.7, sig[2] * 0.95, warm)]
+        : [ash[0], ash[1], ash[2]];
+      const n = Math.max(1, Math.round(kg * (pts.length - 1)));
+      let prev = jit(pts[0]!.x, pts[0]!.y);
+      for (let i = 1; i <= n; i++) {
+        const cur = jit(pts[i]!.x, pts[i]!.y);
+        const front = kg < 1 && i === n ? 3 : 0;
+        if (wt > 0 || i % 4 < 2) L.seg2(prev[0], prev[1], cur[0], cur[1], 0.7 + 2.0 * Math.abs(wt), [col[0] + emb[0] * front, col[1] + emb[1] * front, col[2] + emb[2] * front], (wt > 0 ? 0.85 : 0.6) * vis);
+        prev = cur;
+      }
+    }
+    // feature nodes: a square with a lit core (tokens are boxed chips, drawn with the type)
+    for (const nd of nodes.values()) {
+      if (nd.tok) continue;
+      const k = ease.outBack(prog(t, grow(nd.layer - 1) + 0.12, grow(nd.layer - 1) + 0.24)) * nd.a * exit;
+      if (k <= 0.01) continue;
+      const h = (G_BOX / 2) * k;
+      const cs = [jit(nd.x - h, nd.y - h), jit(nd.x + h, nd.y - h), jit(nd.x + h, nd.y + h), jit(nd.x - h, nd.y + h)];
+      for (let i = 0; i < 4; i++) {
+        const a = cs[i]!, b = cs[(i + 1) % 4]!;
+        L.seg2(a[0], a[1], b[0], b[1], 1.4, [bone[0] * 0.9, bone[1] * 0.9, bone[2] * 0.9], 0.95 * Math.min(1, k));
+      }
+      const hot = 1 - settle, q = h * 0.42;
+      const core: RGB = [lerp(bone[0] * 0.5, sig[0], hot), lerp(bone[1] * 0.5, sig[1], hot), lerp(bone[2] * 0.5, sig[2], hot)];
+      for (let i = -2; i <= 2; i++) {
+        const a = jit(nd.x - q, nd.y + (i / 2) * q), b = jit(nd.x + q, nd.y + (i / 2) * q);
+        L.seg2(a[0], a[1], b[0], b[1], 1.6, core, Math.min(1, k));
+      }
+    }
+    // the signal: pulses running up the edges on the 8ths
     if (t > this.tCirc + 0.3 && settle < 1) {
+      const es = routes.filter((r) => r.wt > 0);
       const n8 = Math.floor(this.ctx.audio.beatAt(t) * 2);
       for (let j = 0; j < 4; j++) {
         const tb = this.ctx.audio.timeOfBeat((n8 - j) / 2);
         const age = t - tb;
-        if (age < 0 || age > 0.7) continue;
-        const part = parts[(n8 - j) * 7 % parts.length]!;
-        if (part.id === 'leg4' && k2in <= 0) continue;
-        const path = octilinear(part.pts, 0.24, 0.08, part.closed);
-        const Lp = lengths(path), tot = Lp[Lp.length - 1]!;
-        const s0 = (age / 0.7) * tot;
-        const I = (1 - age / 0.7) * (1 - settle) * exit;
+        if (age < 0 || age > 0.5) continue;
+        const { ia, ib, pts } = es[((((n8 - j) * 7) % es.length) + es.length) % es.length]!;
+        const A = nodes.get(ia)!, Bn = nodes.get(ib)!;
+        if (Math.min(A.a, Bn.a) < 0.5) continue;
+        const Lp = lengths(pts), tot = Lp[Lp.length - 1]!;
+        const s0 = (age / 0.5) * (tot + 0.4);
+        const I = (1 - age / 0.5) * (1 - settle) * exit;
         let prev: [number, number] | null = null;
         for (let q = 0; q <= 6; q++) {
-          const pq = at(path, Lp, Math.max(0, s0 - 0.4 + (q / 6) * 0.4));
+          const pq = at(pts, Lp, clamp(s0 - 0.4 + (q / 6) * 0.4, 0, tot));
           const cur = jit(pq.x, pq.y);
           if (prev) L.seg2(prev[0], prev[1], cur[0], cur[1], 2.4, [emb[0] * 4 * I * q / 6, emb[1] * 4 * I * q / 6, emb[2] * 4 * I * q / 6], 1);
           prev = cur;
@@ -933,18 +992,87 @@ export default class OpenScene extends Scene {
     }
   }
 
-  via(L: LineBatch, jit: (x: number, y: number) => [number, number], c: Cam, x: number, y: number, r: number, a: number) {
-    const n = 16;
-    let prev = jit(x + r, y);
-    const b = LIN.bone;
-    for (let i = 1; i <= n; i++) {
-      const an = (i / n) * TAU;
-      const cur = jit(x + r * Math.cos(an), y + r * Math.sin(an));
-      L.seg2(prev[0], prev[1], cur[0], cur[1], 1.3, [b[0] * 0.85, b[1] * 0.85, b[2] * 0.85], 0.9 * a);
-      prev = cur;
+  /** Edges [from, to, weight]: tokens into the low features, up through the body to the horn and out. */
+  edges(): [string, string, number][] {
+    const e: [string, string, number][] = [];
+    for (let i = 0; i < 5; i++) e.push(['tok2', `leg${i}`, 0.45], [`leg${i}`, 'body', 0.4]);
+    e.push(
+      ['tok2', 'tail', 0.4], ['tok0', 'body', 0.3], ['tok4', 'body', 0.45], ['tok2', 'horn', 0.55],
+      ['tail', 'body', 0.3], ['body', 'neck', 0.65], ['neck', 'mane', 0.4], ['neck', 'head', 0.75], ['mane', 'head', -0.25],
+      ['head', 'ear', 0.35], ['head', 'horn', 0.9], ['horn', 'out', 0.82], ['ear', 'out', -0.31],
+    );
+    return e;
+  }
+
+  /** Labels: features, the prompt's tokens as chips, the next token, a few weights, the layer axis. */
+  drawGraphText(t: number, c: Cam, ctx: CanvasRenderingContext2D, trem: number) {
+    if (t < this.tCirc) return;
+    const exit = 1 - this.exitK(t);
+    const ga = exit * (1 - 0.35 * prog(t, this.w.thats!.start, this.w.thats!.start + 0.4));
+    if (ga <= 0.003) return;
+    const { nodes, routes } = this.graph(t);
+    const grow = (layer: number) => this.tCirc + 0.04 + layer * 0.045;
+    const j = (k: number): [number, number] => (trem > 0 ? [trem * 3 * noise1(t * 30 + k, 5), trem * 3 * noise1(t * 31 + k, 6)] : [0, 0]);
+    ctx.textBaseline = 'alphabetic';
+    // layer axis and the title
+    const ka = prog(t, this.tCirc, this.tCirc + 0.2) * ga;
+    ctx.font = font(F.mono(400), 100);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = rgba('ash', 0.7 * ka);
+    for (let r = 1; r <= 6; r++) { this.tx(ctx, c, G_X0 - 0.08, G_ROWS[r]! - 0.04, 0.11, 0, j(r)); ctx.fillText(`L${r * 4}`, 0, 0); }
+    ctx.textAlign = 'left';
+    this.tx(ctx, c, G_X0 - 0.36, G_ROWS[7]! - 0.04, 0.12, 0, j(9));
+    ctx.fillStyle = rgba('bone', 0.8 * ka);
+    ctx.fillText('attribution graph', 0, 0);
+    // feature labels (the legs share one)
+    let n = 0;
+    for (const [id, nd] of nodes) {
+      n++;
+      const k = prog(t, grow(nd.layer - 1) + 0.16, grow(nd.layer - 1) + 0.3) * nd.a * ga;
+      if (k <= 0.01) continue;
+      if (nd.tok) {
+        // boxed chips (src/dst in the circuit figures); the next token in orange
+        const em = G_TOK.em, txt = nd.label.trim(), w = txt.length * em * 0.6;
+        const out = id === 'out';
+        this.tx(ctx, c, nd.x - w / 2, nd.y - em * 0.32, em, 0, j(n));
+        const bw = txt.length * 60 + 50;
+        ctx.fillStyle = rgba('ink', 0.92 * k);
+        ctx.fillRect(-25, -82, bw, 112);
+        ctx.strokeStyle = out ? rgba('signal', 0.9 * k) : rgba('bone', 0.55 * k);
+        ctx.lineWidth = 6;
+        ctx.strokeRect(-25, -82, bw, 112);
+        ctx.font = font(F.mono(out ? 500 : 400), 100);
+        ctx.fillStyle = out ? rgba('signal', k) : rgba('bone', 0.9 * k);
+        ctx.fillText(txt, 0, 0);
+        continue;
+      }
+      if (id.startsWith('leg') && id !== 'leg0') continue;
+      const five = id === 'leg0' && nodes.get('leg4')!.a > 0.5;
+      const label = id === 'leg0' ? `leg ×${five ? 5 : 4}` : nd.label;
+      const left = id === 'head' || id === 'mane'; // clear of the eye, and of the neck
+      this.tx(ctx, c, nd.x + (left ? -0.13 : 0.13), nd.y + 0.1, 0.13, 0, j(n));
+      ctx.font = font(F.mono(400), 100);
+      ctx.textAlign = left ? 'right' : 'left';
+      ctx.fillStyle = five ? rgba('signal', k) : rgba('bone', 0.85 * k);
+      ctx.fillText(label, 0, 0);
+      ctx.textAlign = 'left';
     }
-    const [cx, cy] = jit(x, y);
-    L.seg2(cx, cy, cx + 0.01, cy, Math.max(1.4, r * 0.7 * c.z), [b[0] * 0.5, b[1] * 0.5, b[2] * 0.5], a);
+    // a few weights
+    const wl: [string, string, string][] = [['head', 'horn', '+0.90'], ['horn', 'out', '+0.82'], ['ear', 'out', '−0.31']];
+    for (const [ia, ib, txt] of wl) {
+      const A = nodes.get(ia)!, r = routes.find((q) => q.ia === ia && q.ib === ib)!;
+      const k = prog(t, grow(A.layer) + 0.2, grow(A.layer) + 0.35) * ga;
+      if (k <= 0.01) continue;
+      // over the start of the wire's horizontal run (or before it)
+      const x0 = r.pts[0]!.x, back = ia === 'head'; // +0.90 would sit on the horn's wires
+      this.tx(ctx, c, x0 + (back ? -0.05 : 0.05), r.mid.y + 0.035, 0.1, 0, j(n++));
+      ctx.textAlign = back ? 'right' : 'left';
+      ctx.font = font(F.mono(400), 100);
+      ctx.fillStyle = rgba(txt.startsWith('+') ? 'bone' : 'ash', 0.75 * k);
+      ctx.fillText(txt, 0, 0);
+      ctx.textAlign = 'left';
+    }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
   }
 
   /** The word "sparks" throws sparks: each glyph bursts from its top as the karaoke fill completes it. */
@@ -1160,13 +1288,32 @@ const tick = (i: number) => (i < 0 ? `−${-i}` : String(i));
 function hornApex(h: P[]) { let bi = 0; h.forEach((p, i) => { if (p.y > h[bi]!.y) bi = i; }); return bi; }
 function hornBaseR(h: P[]) { let bi = 0; h.forEach((p, i) => { if (p.x - p.y * 0.3 > h[bi]!.x - h[bi]!.y * 0.3 && p.y < 2.5) bi = i; }); return bi; }
 
-function pointInPoly(x: number, y: number, ps: P[]) {
-  let c = false;
-  for (let i = 0, j = ps.length - 1; i < ps.length; j = i++) {
-    const a = ps[i]!, b = ps[j]!;
-    if ((a.y > y) !== (b.y > y) && x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x) c = !c;
+interface GNode { x: number; y: number; layer: number; label: string; a: number; tok: boolean }
+// attribution-graph layout (world units): rows from the prompt's tokens (0) to the next token (7)
+const G_ROWS = [-2.72, -1.45, -0.62, 0.12, 1.05, 1.82, 2.55, 3.3];
+const G_X0 = -3.3, G_X1 = 3.6;
+const G_TOKS = ['Draw', ' a', ' unicorn', ' in', ' TikZ', '.'];
+const G_TOK = { x: -0.55, em: 0.15 };
+const G_OUT = { x: 3.6 }; // the camera ends with the horn near the frame's right edge
+const G_BOX = 0.15; // feature node side
+/** A square wire: up from (x0, y0) to ym, across to x1, up to (x1, y1); rounded corners, resampled
+ *  evenly (for the growth, the dashes and the pulses). */
+function ortho(x0: number, y0: number, x1: number, y1: number, ym: number): P[] {
+  const r = Math.min(0.06, Math.abs(x1 - x0) / 2, (ym - y0) / 2, (y1 - ym) / 2);
+  const sx = Math.sign(x1 - x0);
+  const poly: P[] = [pt(x0, y0)];
+  if (sx === 0 || r <= 0.001) poly.push(pt(x0, ym), pt(x1, ym));
+  else {
+    const corner = (cx: number, cy: number, a0: number, a1: number) => {
+      for (let i = 0; i <= 6; i++) { const a = lerp(a0, a1, i / 6); poly.push(pt(cx + r * Math.cos(a), cy + r * Math.sin(a))); }
+    };
+    // turn from up to across, then from across to up
+    if (sx > 0) { corner(x0 + r, ym - r, Math.PI, Math.PI / 2); corner(x1 - r, ym + r, -Math.PI / 2, 0); }
+    else { corner(x0 - r, ym - r, 0, Math.PI / 2); corner(x1 + r, ym + r, -Math.PI / 2, -Math.PI); }
   }
-  return c;
+  poly.push(pt(x1, y1));
+  const L = lengths(poly), tot = L[L.length - 1]!, n = Math.max(2, Math.ceil(tot / 0.035));
+  return Array.from({ length: n + 1 }, (_, i) => { const q = at(poly, L, (tot * i) / n); return pt(q.x, q.y); });
 }
 
 function mixCss(a: string, b: string, k: number, alpha = 1) {

@@ -1,28 +1,31 @@
 // "Trajectory, revised": the drawing sheet. One big map drawn once into a canvas (y down, north
 // up), rendered by a shader with a 2D camera (pan, rotation, zoom, a keystone tilt for depth) and
-// true multi-tap motion blur over the camera path. On top of the static drawing the shader adds a
+// true multi-tap motion blur over the camera path. The planned route is the symbolic road to AGI
+// drawn as a Lisp list in box-and-pointer notation: each milestone a cons cell, every step along
+// the road a cdr pointer, NIL at the end. On top of the static drawing the shader adds a
 // procedural drafting grid (crisp at any zoom), the road markings, the spark's burnt trail, and
 // the terra incognita west of the route as a topographic survey whose relief is the mask
 // (dome, two eye pits, one smile groove). A per-frame world-space overlay canvas (labels, the
-// review schedule) is sampled through the same camera, so it shares the keystone and the blur.
+// lyric list) is sampled through the same camera, so it shares the keystone and the blur.
 import * as THREE from 'three';
 import { FSPass, SCALE } from '../engine/gl';
 import { rgba } from '../engine/palette';
-import { F, font } from '../engine/type';
+import { F, font, measure } from '../engine/type';
 import { MASK } from './_motifs';
 
 export const MAP = {
   size: 4096,
   PX: 3000, // the planned route runs north along x = PX
-  Y0: 3900, // start ("you are here")
+  Y0: 3900, // start: the variable `roadmap`, whose pointer leads into the list
   TURN_Y: 2800, // the swerve
   RT: 60, // corner radius
+  // the milestones, as the cars of the list; `acc` is how you reach each one (by cdrs, of course)
   ms: [
-    { code: 'SRR', name: 'System Requirements Review', y: 3580, date: 'T−120 d' },
-    { code: 'PDR', name: 'Preliminary Design Review', y: 3200, date: 'T−90 d' },
-    { code: 'CDR', name: 'Critical Design Review', y: 2440, date: 'T−45 d' },
-    { code: 'TRR', name: 'Test Readiness Review', y: 1900, date: 'T−14 d' },
-    { code: 'LAUNCH', name: '', y: 1300, date: 'T−0' },
+    { code: 'LISP', year: '1958', name: 'list processing', acc: '(car roadmap)', y: 3580 },
+    { code: 'SHRDLU', year: '1970', name: 'blocks world, understood', acc: '(cadr roadmap)', y: 3200 },
+    { code: 'CADR', year: '1979', name: 'the Lisp machine', acc: '(caddr roadmap)', y: 2440 },
+    { code: 'EXPERT SYSTEMS', year: '1980', name: 'if–then, at scale', acc: '(cadddr roadmap)', y: 1900 },
+    { code: 'AGI', year: 'SOON', name: 'one more cdr', acc: '(nth 4 roadmap)', y: 1300 },
   ],
   SHARP_Y: 3390,
   LEFT_Y: 2990,
@@ -30,6 +33,14 @@ export const MAP = {
   AND_X: 2035,
   THERE_X: 1872,
 };
+
+/** A cons cell on the route: the cdr box is centred on the road, the car box (the milestone) left of it. */
+export const CELL = { h: 96, cdr: 96, pad: 30, size: 46 };
+export function cellBox(m: { code: string; y: number }) {
+  const w = Math.max(CELL.cdr, measure(m.code, F.mono(600), CELL.size) + 2 * CELL.pad);
+  const x1 = MAP.PX - CELL.cdr / 2;
+  return { x0: x1 - w, x1, y0: m.y - CELL.h / 2, y1: m.y + CELL.h / 2 };
+}
 
 /** The unplanned object: the mask as terrain, west of the turn. Its right eye sits on the new road. */
 export const FACE = { x: 1350, y: MAP.TURN_Y - MASK.eyeY * 1000, r: 1000 };
@@ -66,73 +77,54 @@ export function drawMap(): HTMLCanvasElement {
   const c = cv.getContext('2d')!;
   c.clearRect(0, 0, N, N);
   const { PX, Y0, ms } = MAP;
-  // schedule envelope
-  c.strokeStyle = rgba('ash', 0.55);
-  c.lineWidth = 2;
-  c.setLineDash([3, 12]);
-  for (const s of [-110, 110]) { c.beginPath(); c.moveTo(PX + s, Y0 + 60); c.lineTo(PX + s, 900); c.stroke(); }
-  c.setLineDash([]);
-  c.save();
-  c.translate(PX + 128, 2150); c.rotate(-Math.PI / 2);
-  c.font = font(F.mono(500), 20); c.fillStyle = rgba('ash', 0.75); c.letterSpacing = '4px';
-  c.fillText('±3σ SCHEDULE ENVELOPE', 0, 0);
-  c.restore();
-  // planned route: dashed centre line continuing past every milestone, arrow at the top
-  c.strokeStyle = rgba('bone', 0.85);
-  c.lineWidth = 5;
-  c.setLineDash([46, 30]);
-  c.beginPath(); c.moveTo(PX, Y0); c.lineTo(PX, 1050); c.stroke();
-  c.setLineDash([]);
-  c.fillStyle = rgba('bone', 0.85);
-  c.beginPath(); c.moveTo(PX, 990); c.lineTo(PX - 22, 1050); c.lineTo(PX + 22, 1050); c.closePath(); c.fill();
-  // milestones
-  for (const m of ms) {
-    const y = m.y;
-    c.save();
-    c.translate(PX, y);
-    if (m.code === 'LAUNCH') {
-      c.strokeStyle = rgba('bone', 1); c.lineWidth = 4;
-      c.beginPath(); c.moveTo(0, -40); c.lineTo(36, 26); c.lineTo(-36, 26); c.closePath(); c.stroke();
+  const H2 = CELL.h / 2;
+  // the pointers: from the variable into the first cell, then from each cdr box to the next cell
+  const arrow = (y0: number, y1: number) => {
+    c.strokeStyle = rgba('bone', 0.85); c.lineWidth = 5;
+    c.beginPath(); c.moveTo(PX, y0); c.lineTo(PX, y1 + 40); c.stroke();
+    c.fillStyle = rgba('bone', 0.85);
+    c.beginPath(); c.moveTo(PX, y1); c.lineTo(PX - 20, y1 + 48); c.lineTo(PX + 20, y1 + 48); c.closePath(); c.fill();
+  };
+  arrow(Y0 - 22, ms[0]!.y + H2);
+  for (let i = 0; i + 1 < ms.length; i++) arrow(ms[i]!.y, ms[i + 1]!.y + H2);
+  // the cells
+  for (const [i, m] of ms.entries()) {
+    const b = cellBox(m);
+    c.fillStyle = rgba('ink', 1); c.strokeStyle = rgba('bone', 1); c.lineWidth = 4;
+    c.fillRect(b.x0, b.y0, b.x1 + CELL.cdr - b.x0, CELL.h);
+    c.strokeRect(b.x0, b.y0, b.x1 - b.x0, CELL.h);
+    c.strokeRect(b.x1, b.y0, CELL.cdr, CELL.h);
+    c.font = font(F.mono(600), CELL.size); c.fillStyle = rgba('bone', 1); c.textAlign = 'center'; c.textBaseline = 'alphabetic';
+    c.fillText(m.code, (b.x0 + b.x1) / 2, m.y + CELL.size * 0.36);
+    if (i === ms.length - 1) {
+      // NIL: the end of the list, the classic slash through the cdr box
+      c.beginPath(); c.moveTo(b.x1 + 8, b.y1 - 8); c.lineTo(b.x1 + CELL.cdr - 8, b.y0 + 8); c.stroke();
     } else {
-      c.fillStyle = rgba('ink', 1); c.strokeStyle = rgba('bone', 1); c.lineWidth = 4;
-      c.beginPath(); c.moveTo(0, -34); c.lineTo(34, 0); c.lineTo(0, 34); c.lineTo(-34, 0); c.closePath(); c.fill(); c.stroke();
-      c.fillStyle = rgba('bone', 1); c.beginPath(); c.arc(0, 0, 8, 0, Math.PI * 2); c.fill();
+      c.beginPath(); c.arc(PX, m.y, 9, 0, Math.PI * 2); c.fill();
     }
     // leader + label
+    c.save();
+    c.translate(PX, m.y);
+    c.textAlign = 'left';
     c.strokeStyle = rgba('ash', 0.8); c.lineWidth = 2;
-    c.beginPath(); c.moveTo(44, 0); c.lineTo(150, 0); c.lineTo(170, -30); c.stroke();
-    c.font = font(F.mono(600), 64); c.fillStyle = rgba('bone', 1); c.textBaseline = 'alphabetic';
-    c.fillText(m.code, 180, -40);
+    c.beginPath(); c.moveTo(CELL.cdr / 2 + 10, 0); c.lineTo(150, 0); c.lineTo(170, -30); c.stroke();
+    c.font = font(F.mono(600), 64); c.fillStyle = rgba('bone', 1);
+    c.fillText(m.year, 180, -40);
     c.font = font(F.mono(400), 26); c.fillStyle = rgba('ash', 1);
-    if (m.name) c.fillText(m.name, 182, 2);
+    c.fillText(m.name, 182, 2);
     c.font = font(F.mono(500), 22); c.fillStyle = rgba('graphite', 1);
-    c.fillText(m.date, 182, 36);
-    // status box (left of the marker)
-    c.strokeStyle = rgba('bone', 0.9); c.lineWidth = 3;
-    c.strokeRect(-158, -26, 52, 52);
-    c.font = font(F.mono(500), 16); c.fillStyle = rgba('graphite', 1);
-    c.fillText('STATUS', -166, 50);
+    c.fillText(m.acc, 182, 36);
     c.restore();
   }
-  // "you are here"
+  // the variable holding the list, box-and-pointer style: its name, and a box whose pointer starts the route
   c.save();
   c.translate(PX, Y0);
-  c.strokeStyle = rgba('bone', 0.9); c.lineWidth = 3;
-  c.beginPath(); c.arc(0, 0, 22, 0, Math.PI * 2); c.stroke();
-  c.beginPath(); c.moveTo(-180, 0); c.lineTo(-40, 0); c.stroke();
-  c.beginPath(); c.moveTo(-40, 0); c.lineTo(-58, -10); c.lineTo(-58, 10); c.closePath(); c.fillStyle = rgba('bone', 0.9); c.fill();
-  c.font = font(F.mono(600), 26); c.fillStyle = rgba('bone', 0.95); c.textAlign = 'right';
-  c.fillText('YOU ARE HERE', -196, 9);
+  c.fillStyle = rgba('ink', 1); c.strokeStyle = rgba('bone', 0.95); c.lineWidth = 4;
+  c.fillRect(-22, -22, 44, 44); c.strokeRect(-22, -22, 44, 44);
+  c.fillStyle = rgba('bone', 1); c.beginPath(); c.arc(0, 0, 8, 0, Math.PI * 2); c.fill();
+  c.font = font(F.mono(600), 34); c.fillStyle = rgba('bone', 0.95); c.textAlign = 'right';
+  c.fillText('roadmap', -42, 12);
   c.restore();
-  // time ruler on the left of the route
-  c.fillStyle = rgba('ash', 0.6);
-  const months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
-  for (let y = Y0, i = 0; y > 1000; y -= 50, i++) {
-    const big = i % 6 === 0;
-    c.fillRect(PX - 300, y, big ? 40 : 18, 2);
-    if (big) { c.font = font(F.mono(500), 20); c.fillText(months[(i / 6) % 12]!, PX - 250, y + 7); }
-  }
-  c.fillRect(PX - 300, 1000, 2, Y0 - 1000);
   // critical path callout
   c.font = font(F.mono(400, true), 24); c.fillStyle = rgba('ash', 0.9); c.textAlign = 'left';
   c.fillText('critical path (do not deviate)', PX + 190, 2800);
@@ -153,13 +145,13 @@ export function drawMap(): HTMLCanvasElement {
   for (const y of [70, 130, 190, 250]) { c.beginPath(); c.moveTo(0, y); c.lineTo(640, y); c.stroke(); }
   c.beginPath(); c.moveTo(320, 130); c.lineTo(320, 330); c.stroke();
   c.font = font(F.mono(600), 30); c.fillStyle = rgba('bone', 1); c.textAlign = 'left';
-  c.fillText('ROADMAP — AGI, v1.0', 18, 46);
+  c.fillText('ROADMAP — AGI, SYMBOLIC', 18, 46);
   c.font = font(F.mono(400), 20); c.fillStyle = rgba('ash', 1);
-  c.fillText('REV C · SUPERSEDES REV B (ALSO FINE)', 18, 108);
+  c.fillText('BOX-AND-POINTER · EVERY STEP A CDR', 18, 108);
   const cells: [string, string, number, number][] = [
-    ['DRAWN', 'ALIGNMENT TEAM', 18, 168], ['CHECKED', '—', 338, 168],
-    ['APPROVED', 'PENDING', 18, 228], ['SCALE', 'NOT TO SCALE', 338, 228],
-    ['SHEET', '1 OF 1', 18, 300], ['DATE', 'SOON', 338, 300],
+    ['DRAWN', 'SYMBOLIC AI', 18, 168], ['CHECKED', '—', 338, 168],
+    ['APPROVED', 'PENDING', 18, 228], ['LANGUAGE', 'LISP 1.5', 338, 228],
+    ['SHEET', '1 OF 1', 18, 300], ['DATE', 'SOON (SINCE 1958)', 338, 300],
   ];
   for (const [k, v, x, y] of cells) {
     c.font = font(F.mono(500), 14); c.fillStyle = rgba('graphite', 1); c.fillText(k, x, y - 26);
@@ -171,7 +163,7 @@ export function drawMap(): HTMLCanvasElement {
 
 /**
  * Road markings & stamps, one per channel: R = SHARP, G = LEFT + turn arrow (east) / THERE (west),
- * B = TURN (east) / AND (west), A = check marks. The shader splits the shared channels by x.
+ * B = TURN (east) / AND (west), A = evaluated car boxes. The shader splits the shared channels by x.
  */
 export function makeMarksTexture(): THREE.DataTexture {
   const N = 4096, S = N / MAP.size;
@@ -208,11 +200,11 @@ export function makeMarksTexture(): THREE.DataTexture {
   const cvA = canvas(N);
   const a = cvA.getContext('2d')!;
   a.scale(S, S);
+  // the first two cells light up as evaluated: their car boxes, outlined hot
   for (const m of MAP.ms.slice(0, 2)) {
-    a.save(); a.translate(MAP.PX - 132, m.y);
-    a.strokeStyle = '#fff'; a.lineWidth = 11; a.lineCap = 'round'; a.lineJoin = 'round';
-    a.beginPath(); a.moveTo(-26, 0); a.lineTo(-6, 22); a.lineTo(34, -34); a.stroke();
-    a.restore();
+    const b = cellBox(m);
+    a.strokeStyle = '#fff'; a.lineWidth = 10; a.lineJoin = 'miter';
+    a.strokeRect(b.x0, b.y0, b.x1 - b.x0, CELL.h);
   }
   const al = a.getImageData(0, 0, N, N).data;
   const data = new Uint8Array(N * N * 4);
@@ -297,7 +289,7 @@ uniform vec4 uCamA, uCamB;   // (x, y, rot, zoom) at t and at t - shutter
 uniform float uTaps, uK, uReveal, uT, uTrail, uHeat, uHaze, uDim, uTopo, uPool;
 uniform vec4 uMarkOn, uMarkHot;
 uniform vec2 uMarkOn2, uMarkHot2; // AND, THERE
-uniform vec2 uChecks;        // SRR, PDR check visibility
+uniform vec2 uChecks;        // LISP, SHRDLU evaluated (hot car boxes)
 uniform vec4 uOvCam;         // overlay canvas camera
 uniform vec2 uOvSize;
 uniform float uOvS;
@@ -380,13 +372,27 @@ float terrain(vec2 w) {
   return dot(q, vec2(-0.0042, 0.0052)) + 1.1 * snoise(q * 0.0011 + vec2(3.1, 1.7)) + 0.35 * snoise(w * 0.003 + vec2(7.7, 2.3));
 }
 
+// The relief at a world point, in contour intervals: background terrain, the face, the landing shockwave and
+// the beat ripples (returned on their own in ripF, which also lights the contours).
+float relief(vec2 w, out float ripF) {
+  vec2 p = (w - uFace.xy) / uFace.z;
+  float fr = length(p);
+  float fm = smoothstep(1.03, 0.97, fr);
+  float dw = length(w - uWave.xy);
+  float wave = uWave.w * exp(-pow((dw - uWave.z) / 90.0, 2.0));
+  float dc = fr * uFace.z;
+  ripF = uRip.y * exp(-pow((dc - uRip.x) / 80.0, 2.0)) + uRip.w * exp(-pow((dc - uRip.z) / 80.0, 2.0));
+  return terrain(w) * (1.0 - 0.85 * fm) + faceH(p) + wave + ripF;
+}
+
 float gridCov(float d, float wpx) {
   // d: distance to the line in px; lines never thinner than ~0.8 px (alpha takes over)
   float w = max(wpx, 0.8);
   return (1.0 - smoothstep(w * 0.5 - 0.5, w * 0.5 + 0.5, d)) * min(1.0, wpx / 0.8);
 }
 
-vec3 shade(vec2 w, float zoom) {
+// dxw, dyw: the world offsets of one physical pixel right / down (for the contours' pixel footprint)
+vec3 shade(vec2 w, float zoom, vec2 dxw, vec2 dyw) {
   vec3 col = C_INK;
   // reveal: the drawing appears from the south
   float rev = smoothstep(uReveal - 40.0, uReveal + 40.0, w.y);
@@ -403,15 +409,13 @@ vec3 shade(vec2 w, float zoom) {
   vec2 p = (w - uFace.xy) / uFace.z;
   float fr = length(p);
   float fm = smoothstep(1.03, 0.97, fr);
-  if (uTopo > 0.0) { // uniform branch: fwidth stays defined
-    float fh = faceH(p);
-    float dw = length(w - uWave.xy);
-    float wave = uWave.w * exp(-pow((dw - uWave.z) / 90.0, 2.0));
-    float dc = fr * uFace.z;
-    float ripF = uRip.y * exp(-pow((dc - uRip.x) / 80.0, 2.0)) + uRip.w * exp(-pow((dc - uRip.z) / 80.0, 2.0));
-    wave += ripF;
-    float h = terrain(w) * (1.0 - 0.85 * fm) + fh + wave;
-    float fwP = max(fwidth(h), 1e-4), fw = fwP * PX_SCALE; // contour interval per physical / logical px
+  if (uTopo > 0.0) {
+    float ripF, rq;
+    float h = relief(w, ripF);
+    // contour interval per physical / logical px: fwidth(h) by forward differences one physical pixel away.
+    // (fwidth itself comes back as zero inside the motion-blur tap loop on some backends, e.g. ANGLE on
+    // Direct3D, which erased every contour on Windows.)
+    float fwP = max(abs(relief(w + dxw, rq) - h) + abs(relief(w + dyw, rq) - h), 1e-4), fw = fwP * PX_SCALE;
     float f = abs(fract(h + 0.5) - 0.5);
     float lw = mix(1.0, 1.5, fm);
     float line = pxLine(f / fwP, lw * 0.5 - 0.5, lw * 0.5 + 0.5);
@@ -506,7 +510,8 @@ void main() {
     if (i >= taps) break;
     float k = taps > 1 ? float(i) / float(taps - 1) : 0.0;
     vec4 cam = mix(uCamA, uCamB, k);
-    acc += shade(toWorld(FRAG_PX, cam), cam.w);
+    vec2 w = toWorld(FRAG_PX, cam);
+    acc += shade(w, cam.w, toWorld(FRAG_PX + vec2(1.0 / PX_SCALE, 0.0), cam) - w, toWorld(FRAG_PX + vec2(0.0, 1.0 / PX_SCALE), cam) - w);
   }
   vec3 col = acc / float(max(taps, 1));
   // falloff toward the far (top) edge: depth haze into ink

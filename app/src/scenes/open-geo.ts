@@ -1,6 +1,5 @@
 // B1 `open` — geometry for the unicorn construction plate: primitive builders, resampling,
-// the unicorn at three training checkpoints (crude TikZ primitives → refined), and an
-// octilinear "autorouter" that turns any stroke into PCB traces with vias.
+// and the unicorn at three training checkpoints (crude TikZ primitives → refined).
 // World units are TikZ units, y UP.
 import { clamp, lerp, TAU } from '../engine/util';
 
@@ -193,67 +192,6 @@ export function unicorn(k: 1 | 2 | 3): Part[] {
 }
 
 export const EYE = { k1: pt(2.95, 2.0), k3: pt(3.02, 1.98), r: 0.08 };
-
-// ------------------------------------------------------------------ PCB autorouter
-/**
- * Route a polyline octilinearly (0/45/90°) on a grid: resample every `step`, snap to `grid`,
- * then connect consecutive points with a diagonal run followed by a straight run.
- * Collinear runs are merged. Closed inputs stay closed.
- */
-export function octilinear(ps: P[], step: number, grid: number, closed: boolean): P[] {
-  const L = lengths(ps);
-  const tot = L[L.length - 1]!;
-  const n = Math.max(closed ? 4 : 2, Math.round(tot / step) + 1);
-  const snap = (v: number) => Math.round(v / grid) * grid;
-  const q: P[] = [];
-  for (let i = 0; i < n; i++) {
-    const p = at(ps, L, (tot * i) / (n - 1));
-    const s = { x: snap(p.x), y: snap(p.y) };
-    const last = q[q.length - 1];
-    if (!last || last.x !== s.x || last.y !== s.y) q.push(s);
-  }
-  if (closed && q.length > 1) { const a = q[0]!, b = q[q.length - 1]!; if (a.x !== b.x || a.y !== b.y) q.push({ ...a }); }
-  const out: P[] = [q[0]!];
-  for (let i = 1; i < q.length; i++) {
-    const a = q[i - 1]!, b = q[i]!;
-    const dx = b.x - a.x, dy = b.y - a.y;
-    const m = Math.min(Math.abs(dx), Math.abs(dy));
-    // alternate the order (diagonal first / straight first) so outlines don't staircase
-    const diagFirst = i % 2 === 0;
-    const mid = diagFirst
-      ? { x: a.x + Math.sign(dx) * m, y: a.y + Math.sign(dy) * m }
-      : { x: b.x - Math.sign(dx) * m, y: b.y - Math.sign(dy) * m };
-    if ((mid.x !== a.x || mid.y !== a.y) && (mid.x !== b.x || mid.y !== b.y)) out.push(mid);
-    out.push(b);
-  }
-  // merge collinear
-  const merged: P[] = [out[0]!];
-  for (let i = 1; i < out.length - 1; i++) {
-    const a = merged[merged.length - 1]!, b = out[i]!, c = out[i + 1]!;
-    const cr = (b.x - a.x) * (c.y - b.y) - (b.y - a.y) * (c.x - b.x);
-    if (Math.abs(cr) > 1e-9) merged.push(b);
-  }
-  merged.push(out[out.length - 1]!);
-  return merged;
-}
-
-/** Offset a polyline sideways by d (miter joins, clamped). */
-export function offset(ps: P[], d: number, closed: boolean): P[] {
-  const n = ps.length;
-  const out: P[] = [];
-  for (let i = 0; i < n; i++) {
-    let a = ps[i - 1], b = ps[i + 1];
-    if (closed) { if (i === 0) a = ps[n - 2]; if (i === n - 1) b = ps[1]; }
-    const p = ps[i]!;
-    const n1 = a ? norm(a, p) : null, n2 = b ? norm(p, b) : null;
-    let nx = 0, ny = 0;
-    if (n1 && n2) { nx = n1.x + n2.x; ny = n1.y + n2.y; const l = Math.hypot(nx, ny) || 1; nx /= l; ny /= l; const c = nx * n1.x + ny * n1.y; const m = 1 / Math.max(0.5, c); nx *= m; ny *= m; }
-    else { const k = (n1 ?? n2)!; nx = k.x; ny = k.y; }
-    out.push({ x: p.x + nx * d, y: p.y + ny * d });
-  }
-  return out;
-}
-function norm(a: P, b: P) { const dx = b.x - a.x, dy = b.y - a.y, l = Math.hypot(dx, dy) || 1; return { x: -dy / l, y: dx / l }; }
 
 export function centroid(ps: P[]): P {
   let x = 0, y = 0;

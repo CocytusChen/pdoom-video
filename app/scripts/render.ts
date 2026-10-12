@@ -6,12 +6,15 @@
 //   perf:    bun scripts/render.ts perf --from 20 --to 25 [--only ids] [--samples 1] [--shutter 0.5]   (avg ms per frame incl. GPU sync and the export's pixel readback)
 //   video:   bun scripts/render.ts video [--from 0] [--to 156.65] [--fps 60] [--crf 16] [--x264 aq-mode=3] [--samples 1] [--shutter 0.5] [--out ../out/pdoom.mp4] [--noaudio]
 //            [--workers 2] [--chunk 8] [--mem-gb 1] [--spool-gb 20]
+//            [--codec h265]: libx265, 10-bit, preset medium, CRF 18 by default (about half the size of the x264 file)
 //            --samples N averages N sub-frames per frame over shutter×(1/fps): motion blur + temporal AA;
 //            --samples auto picks the count per 32x32 tile (12, 36, 108 or 324, see Engine.render; --refine frame: per frame)
 //            --workers N headless Chromes render chunks of --chunk frames into one ffmpeg, in order (see video())
 //   --scale N (all modes): render at N× the 1920x1080 layout (--scale 2 = true 3840x2160); stills are then saved
 //            full-res from the pixel buffer, videos are encoded at the physical size.
 // Uses the Vite dev server at --url (default http://localhost:5173); starts a private one if unreachable.
+// --channel msedge (all modes) drives Edge instead of Chrome. The GPU backend follows the platform: ANGLE on Metal
+// (macOS), Vulkan (Linux; its headless default is SwiftShader, on the CPU), Direct3D 11 (Windows).
 import { chromium, type Page } from 'playwright-core';
 import { mkdirSync, existsSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -41,17 +44,18 @@ async function ensureServer(): Promise<{ url: string; stop: () => void }> {
   if (await reachable(url)) return { url, stop: () => {} };
   const port = 5300 + Math.floor(Math.random() * 500);
   // no live reload: a file saved mid-render must not reload the page
-  const proc = Bun.spawn(['bunx', 'vite', '--port', String(port), '--strictPort'], { cwd: APP, stdout: 'ignore', stderr: 'ignore', env: { ...process.env, PDOOM_NO_HMR: '1' } });
+  const proc = Bun.spawn([process.execPath, 'x', 'vite', '--port', String(port), '--strictPort'], { cwd: APP, stdout: 'ignore', stderr: 'ignore', env: { ...process.env, PDOOM_NO_HMR: '1' } });
   const u = `http://localhost:${port}`;
   for (let i = 0; i < 100 && !(await reachable(u)); i++) await Bun.sleep(100);
   return { url: u, stop: () => proc.kill() };
 }
 
 async function openPage(url: string) {
+  const angle = process.platform === 'darwin' ? ['--use-angle=metal'] : process.platform === 'linux' ? ['--use-angle=vulkan', '--enable-features=Vulkan'] : [];
   const browser = await chromium.launch({
-    channel: 'chrome',
+    channel: opt('channel', 'chrome'),
     headless: !flag('headed'),
-    args: ['--use-angle=metal', '--enable-gpu-rasterization', '--ignore-gpu-blocklist', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows'],
+    args: [...angle, '--enable-gpu-rasterization', '--ignore-gpu-blocklist', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows'],
   });
   const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
   const logs: string[] = [];
@@ -116,15 +120,19 @@ async function sheet(page: Page, times: number[], cols: number, out: string) {
  */
 async function video(url: string, from: number, to: number, fps: number, out: string) {
   mkdirSync(path.dirname(out), { recursive: true });
-  const crf = opt('crf', '16')!;
+  const h265 = opt('codec', 'h264') === 'h265';
+  const crf = opt('crf', h265 ? '18' : '16')!;
   const audio = path.join(ROOT, 'audio/pdoom.mp3');
   // (frames come as rgb24: the same YUV out of the scaler as from rgba, a quarter fewer bytes to move)
   const args = ['ffmpeg', '-y', '-loglevel', 'error', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', `${OW}x${OH}`, '-r', String(fps), '-i', 'pipe:0'];
   if (!flag('noaudio')) args.push('-ss', String(from), '-t', String(to - from), '-i', audio);
   // Frames are sRGB (toSRGB in the final pass): convert with the BT.709 matrix and tag the stream,
   // otherwise ffmpeg converts with BT.601 while players and YouTube decode untagged HD as BT.709.
-  // scale tags the matrix and range; primaries and transfer need setparams (the -color_* output flags don't reach the stream).
-  args.push('-vf', 'vflip,scale=out_color_matrix=bt709,setparams=color_primaries=bt709:color_trc=bt709', '-c:v', 'libx264', '-preset', opt('preset', 'slow')!, '-crf', crf, '-pix_fmt', 'yuv420p', '-tune', 'grain', '-x264-params', opt('x264', 'aq-mode=3')!);
+  // scale tags the matrix and range on recent ffmpeg; primaries and transfer need setparams (the -color_* output flags
+  // don't reach the stream), and so does the matrix on ffmpeg 6 (Ubuntu 24.04), which scale leaves untagged.
+  args.push('-vf', 'vflip,scale=out_color_matrix=bt709,setparams=color_primaries=bt709:color_trc=bt709:colorspace=bt709');
+  if (h265) args.push('-c:v', 'libx265', '-preset', opt('preset', 'medium')!, '-crf', crf, '-pix_fmt', 'yuv420p10le', '-tune', 'grain', '-x265-params', `log-level=error:colorprim=bt709:transfer=bt709:colormatrix=bt709:range=limited${opt('x265') ? ':' + opt('x265') : ''}`, '-tag:v', 'hvc1');
+  else args.push('-c:v', 'libx264', '-preset', opt('preset', 'slow')!, '-crf', crf, '-pix_fmt', 'yuv420p', '-tune', 'grain', '-x264-params', opt('x264', 'aq-mode=3')!);
   if (!flag('noaudio')) args.push('-c:a', 'aac', '-b:a', '320k', '-shortest');
   args.push('-movflags', '+faststart', out);
   const ff = Bun.spawn(args, { stdin: 'pipe', stdout: 'inherit', stderr: 'inherit' });

@@ -26,7 +26,8 @@ interface Tok {
   first: boolean; // first token of its word
   dist: Cand[] | null;
   pick: number;
-  id: number; // fake token id
+  id: number; // token id (-1: unknown)
+  seed: number; // per-token randomness
   tPopEnd: number; // popup collapse start
 }
 
@@ -76,19 +77,26 @@ export default class Prompt extends Scene {
       let pieces = specs[norm(w.w)];
       if (!pieces || pieces.map((p) => p.s).join('') !== ww) pieces = [{ s: ww, dist: [[ww, 0.5], ['…', 0.12]] }];
       const syl = w.syl && w.syl.length === pieces.length ? w.syl : null;
+      const sylAt = (x: number) => {
+        const [a, b] = w.syl![Math.min(Math.floor(x), w.syl!.length - 1)]!;
+        return a + (x - Math.floor(x)) * (b - a);
+      };
       let off = 0;
       pieces.forEach((p, pi) => {
-        const t0 = pi === 0 ? w.start : syl ? syl[pi]![0] : w.start + pi * Math.min(0.09, (w.end - w.start) / pieces!.length);
+        const t0 = pi === 0 ? w.start
+          : p.syl !== undefined && w.syl ? sylAt(p.syl)
+          : p.at !== undefined ? lerp(w.start, w.end, p.at)
+          : syl ? syl[pi]![0] : w.start + pi * Math.min(0.09, (w.end - w.start) / pieces!.length);
         this.toks.push({
           text: p.s, ci: ci + off, n: p.s.length, space: wi > 0 && pi === 0, t0, word: w, first: pi === 0,
-          dist: p.dist ?? null, pick: p.pick ?? 0, id: 1000 + Math.floor(hash(wi, pi, 7) * 98000), tPopEnd: 0,
+          dist: p.dist ?? null, pick: p.pick ?? 0, id: p.id ?? -1, seed: 1000 + Math.floor(hash(wi, pi, 7) * 98000), tPopEnd: 0,
         });
         off += p.s.length;
       });
       ci += ww.length;
     });
     this.toks.forEach((k, i) => {
-      const next = this.toks[i + 1];
+      const next = this.toks.slice(i + 1).find((n) => n.dist); // the next popup
       const long = k.first && k.word.end - k.word.start > 1.5 && (!next || next.word !== k.word);
       const hold = long ? k.word.end - k.t0 - 0.45 : this.variant === 'gato' ? 0.9 : 0.62;
       k.tPopEnd = Math.max(k.t0 + 0.2, Math.min(k.t0 + hold, next ? next.t0 - POP_PRE - 0.1 : k.t0 + hold));
@@ -126,10 +134,22 @@ export default class Prompt extends Scene {
       camZ: { value: 0 }, glow: { value: 0 }, vp: { value: [0, 0] }, rot: { value: 0 }, rush: { value: 0 }, swallow: { value: 0 },
       beat: { value: 0 }, hotBoost: { value: 1.2 }, spacing: { value: 400 }, barW: { value: 22 }, barCx: { value: W / 2 }, shut: { value: 0 },
       zoomBlur: { value: 0 }, zbCenter: { value: [0.5, 0.5] }, uiAlpha: { value: 1 }, light: { value: 0 },
+      inst: { value: 0 }, fi: { value: 0 },
     });
 
     this.shots = this.makeShots();
     this.comp.u.hotBoost!.value = this.variant === 'gato' ? 0.25 : this.variant === 'sydney' ? 0.9 : 1.2;
+  }
+
+  /** Gato: how unsteady the frame is (0..1). Still while the caret arrives from the list, then it grows
+   *  through the plea, a little more on each sung word, and peaks on ⏎. */
+  private instAt(t: number) {
+    if (this.variant !== 'gato' || t < this.tFirst) return 0;
+    const ramp = Math.pow(prog(t, this.tFirst, this.tEnter), 1.6);
+    let kick = 0;
+    for (const w of this.line.words) if (w.start <= t) kick = Math.max(kick, 0.3 * Math.pow(0.5, (t - w.start) / 0.25));
+    const settle = smoothstep(this.tFirst, this.tFirst + 0.6, t);
+    return clamp(0.15 * settle + 0.85 * ramp + kick * settle * (1 - ramp));
   }
 
   // ------------------------------------------------------------------ camera
@@ -282,8 +302,11 @@ export default class Prompt extends Scene {
       u.shut!.value = shut;
       u.light!.value = kick;
     }
+    const inst = this.instAt(t);
     if (v === 'gato') {
       u.glow!.value = 0.5 + 0.5 * smoothstep(this.tFirst - 0.5, this.tFirst + 1, t);
+      u.inst!.value = inst;
+      u.fi!.value = frameIdx(t) % 4096;
     }
     this.comp.render(renderer, out);
 
@@ -315,7 +338,11 @@ export default class Prompt extends Scene {
     if (v === 'sydney') {
       o.shake = [noise1(t * 30, 3) * 6 * shut, 0];
     }
-    if (v === 'gato') { o.vignette = 0.6; o.grain = 0.065; }
+    if (v === 'gato') {
+      o.vignette = 0.6; o.grain = 0.065;
+      // a tremor, not a shake
+      o.shake = [noise1(t * 23, 7) * 3.5 * inst, noise1(t * 19, 8) * 2.5 * inst];
+    }
     return o;
   }
 
@@ -379,7 +406,7 @@ export default class Prompt extends Scene {
     c.letterSpacing = '3px';
     c.font = font(F.mono(500), 13);
     c.fillStyle = rgba('bone', 0.6);
-    c.fillText(`CONTEXT ${String(nTok).padStart(2, '0')} / 8192`, fx1, fy1 + 30);
+    c.fillText(`CONTEXT ${String(nTok).padStart(2, '0')} / ${META[v].ctx}`, fx1, fy1 + 30);
     c.letterSpacing = '0px';
     c.font = font(F.mono(400), 13);
     c.fillStyle = rgba('ash', 0.75);
@@ -445,6 +472,12 @@ export default class Prompt extends Scene {
     c.save();
     c.font = font(this.fam, FS);
     c.textBaseline = 'alphabetic';
+    // Sydney's name glitches to "Bing," on odd beats, once the whole word is typed
+    const w0 = this.line.words[0]!;
+    const w0Typed = Math.max(...this.toks.filter((k) => k.word === w0).map((k) => k.t0));
+    const b = this.ctx.audio.beatAt(t);
+    const bing = v === 'sydney' && t > Math.max(w0.start + 0.5, w0Typed + 0.1) && t < w0.end - 0.3
+      && b - Math.floor(b) < 0.075 && Math.floor(b) % 2 === 1;
     for (const k of this.toks) {
       if (k.t0 > t) break;
       const x0 = this.tx0 + (k.ci - (k.space ? 1 : 0)) * adv;
@@ -467,16 +500,16 @@ export default class Prompt extends Scene {
       c.fillRect(x0 + 3 + bw - hair, by - 5, hair, 5);
       c.font = font(F.mono(400), 10);
       c.fillStyle = rgba('ash', 0.55 * fade);
-      c.fillText(String(k.id), x0 + 5, by + 14);
+      // Gato's vocabulary was never released: its ids never resolve, rolling through [0, 32000)
+      const id = k.id >= 0 ? k.id : v === 'gato' ? Math.floor(hash(k.seed, frameIdx(t), 21) * 32000) : -1;
+      if (id >= 0) c.fillText(String(id), x0 + 5, by + 14);
       c.font = font(this.fam, FS);
       if (k.space) { c.fillStyle = rgba('graphite', 0.9 * fade); c.fillRect(x0 + adv * 0.5 - 2, base - FS * 0.2, 3, 3); }
-      // glyphs
+      // glyphs ("Bing," flashes over the whole of "Sydney,", drawn by its first token)
+      if (bing && k.word === w0 && !k.first) continue;
       let txt = k.text, gx0 = 0;
-      if (v === 'sydney' && k.first && k.word === this.line.words[0] && t > k.t0 + 0.5 && t < w.end - 0.3) {
-        const b = this.ctx.audio.beatAt(t);
-        if (b - Math.floor(b) < 0.075 && Math.floor(b) % 2 === 1) { txt = 'Bing,'; gx0 = 7; }
-      }
-      for (let i = 0; i < Math.min(k.n, txt.length); i++) {
+      if (bing && k.word === w0) { txt = 'Bing,'; gx0 = 7; }
+      for (let i = 0; i < (gx0 ? txt.length : Math.min(k.n, txt.length)); i++) {
         const ch = txt[i]!;
         const d = this.drift(k.ci + i, t, k.t0);
         const gx = xv + i * adv + d.dx + gx0, gy = base + drop + d.dy;
@@ -545,15 +578,18 @@ export default class Prompt extends Scene {
       c.fillStyle = rgba('ash', 0.85);
       c.fillText('p( next | context )', 10, -hgt + 14);
       c.textAlign = 'right';
-      c.fillText(picked ? 'sampled' : 'computing…', pw - 8, -hgt + 14);
+      const inst = this.instAt(t);
+      const lost = v === 'gato' && picked && hash(k.seed, frameIdx(t), 23) < 0.35 * inst;
+      c.fillText(lost ? 'unresolved' : picked ? 'sampled' : 'computing…', pw - 8, -hgt + 14);
       c.textAlign = 'left';
       const pmax = rows[0]![1];
       rows.forEach(([txt, p0], i) => {
         const unstable = v === 'sydney' && picked && t > k.t0 + 0.25;
-        const p = unstable ? clamp(p0 * (1 + 0.5 * noise1(t * 2.7 + i * 7.3, k.id)), 0.001, 0.99) : p0;
+        const p = unstable ? clamp(p0 * (1 + 0.5 * noise1(t * 2.7 + i * 7.3, k.seed)), 0.001, 0.99)
+          : v === 'gato' && picked ? clamp(p0 * (1 + 0.6 * inst * (hash(i, frameIdx(t), k.seed + 5) - 0.5)), 0.001, 0.99) : p0;
         const y = -hgt + headH + (i + 1) * rh - 5;
         const isPick = i === k.pick;
-        const fl = hash(i, frameIdx(t), k.id) < 0.25 + 0.75 * built;
+        const fl = hash(i, frameIdx(t), k.seed) < 0.25 + 0.75 * built;
         if (!picked && !fl) return;
         const jitter = picked ? 1 : 0.3 + 0.7 * built + (hash(i, Math.floor(t * 30), 3) - 0.5) * 0.5 * (1 - built);
         const on = picked && isPick;
@@ -783,7 +819,7 @@ void main() {
 }`,
   // Alone in the dark: a faint pool of light and a few slow motes.
   gato: /* glsl */ `
-uniform float t, lt, aspect, glow, beat;
+uniform float t, lt, aspect, glow, beat, inst, fi;
 ${UI_OVER}
 void main() {
   vec2 p = (vUv - 0.5) * vec2(aspect, 1.0);
@@ -798,7 +834,15 @@ void main() {
   float d = length(f - o);
   float on = step(0.86, hash12(id + 7.0));
   col += C_BONE * on * 0.18 * smoothstep(0.035, 0.0, d) * glow;
-  col = overUI(col, vUv);
+  // unsteady: a faint trailing double of the UI, and a few thin bands slipping sideways
+  // (re-rolled on the 60 fps grid: fi is the frame index)
+  vec2 gOff = vec2(sin(t * 1.7) + 0.6, cos(t * 1.3) * 0.5) * 7.0 * inst / vec2(1920.0, 1080.0);
+  vec4 gh = texture(ui, vUv - gOff);
+  col = mix(col, gh.rgb, gh.a * 0.2 * inst);
+  float band = floor(vUv.y * 140.0);
+  float slipOn = step(1.0 - 0.1 * inst, hash12(vec2(band, fi)));
+  float slip = slipOn * (hash12(vec2(band + 31.0, fi + 7.0)) - 0.5) * 22.0 * inst / 1920.0;
+  col = overUI(col, vUv + vec2(slip, 0.0));
   fragColor = vec4(col, 1.0);
 }`,
 };

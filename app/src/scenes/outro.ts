@@ -93,7 +93,7 @@ export default class Outro extends Scene {
   /**
    * The overflow, 4 bars after the detonation: P(doom) keeps being upped.
    * Bar 1: the readout's bar runs past 1.0 (the end cap snaps) · bar 2: a log ruler flies by
-   * (π, 10, 42, 1,000) · bar 3: walls of zeros (1e9, 1e30, 1e100, 1e1000) · bar 4: the spark
+   * (π, 10, 42, 1,000) · bar 3: walls of digits (1e30, float32 max, a googol, float64 max) · bar 4: the spark
    * traces ∞, then a 16th-note recap of the climb. `s` = beats since the overflow started.
    */
   private overflow(f: Frame, s: number, post: Record<string, any>) {
@@ -193,12 +193,16 @@ export default class Outro extends Scene {
       c.font = font(F.mono(400), 24); c.fillStyle = rgba('signal', clamp(local * 4));
       c.fillText(notes[step]!, XM + 24, YR - 40);
     } else if (bar === 2) {
-      // walls of zeros: 1 followed by N zeros, typed out and fitted to the frame
-      const Ns = [9, 30, 100, 1000], sci = ['1e9', '1e30', '1e100', '1e1000'];
-      const notes = ['(a billion)', '(one E thirty — see above)', '(a googol)', '(does not fit)'];
-      const N = Ns[step]!;
+      // walls of digits, every one written out and fitted to the frame: the float maxima are exact
+      // (float64's, doubled, is inf: the next bar)
+      const walls = [
+        { digits: '1' + '0'.repeat(30), sci: '1e30', note: '(one E thirty — see above)' },
+        { digits: BigInt(Math.fround(3.4028234663852886e38)).toString(), sci: '3.4e38', note: '(float32 max)' },
+        { digits: '1' + '0'.repeat(100), sci: '1e100', note: '(a googol)' },
+        { digits: BigInt(Number.MAX_VALUE).toString(), sci: '1.8e308', note: '(float64 max. ×2 = inf)' },
+      ];
+      const { digits } = walls[step]!;
       // digit groups of three from the right ("1 000 000 000"), wrapped between groups
-      const digits = '1' + '0'.repeat(N);
       const groups: string[] = [];
       for (let i = digits.length; i > 0; i -= 3) groups.unshift(digits.slice(Math.max(0, i - 3), i));
       const nChars = digits.length + groups.length - 1;
@@ -243,9 +247,9 @@ export default class Outro extends Scene {
       c.letterSpacing = '0px';
       c.textAlign = 'right';
       c.font = font(F.mono(400), 72); c.fillStyle = rgba('signal');
-      c.fillText(sci[step]!, W - 120, 1000);
+      c.fillText(walls[step]!.sci, W - 120, 1000);
       c.font = font(F.mono(400), 22); c.fillStyle = rgba('ash');
-      c.fillText(notes[step]!, W - 120, 1000 - 90);
+      c.fillText(walls[step]!.note, W - 120, 1000 - 90);
       c.textAlign = 'left';
     } else {
       // the spark traces ∞; the last two beats flick back through the whole climb
@@ -271,7 +275,7 @@ export default class Outro extends Scene {
         c.fillText('¹ upper bound removed', cx - A, cy + 330);
       } else {
         // 16th notes: the climb replayed, landing on ∞
-        const seq = ['1.00', '1.50', '3.14', '42.00', '1,000', '1e30', '1e100', '∞'];
+        const seq = ['1.00', '3.14', '42.00', '1,000', '1e30', '3.4e38', '1.8e308', '∞'];
         const i = Math.min(seq.length - 1, Math.floor((s3 - 2) * 4));
         const size = i === seq.length - 1 ? 520 : 300 + hash(i, 5) * 160;
         c.save();

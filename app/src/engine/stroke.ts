@@ -278,6 +278,42 @@ export function strokeText(text: string, fontName: StrokeFontName = 'script', si
 }
 
 /**
+ * Round off a StrokeText's polylines (Chaikin corner cutting, ends kept), for close-ups where the font's
+ * straight segments would show, like a pen signature.
+ */
+export function smoothStrokes(st: StrokeText, iterations = 3): StrokeText {
+  const strokes = st.strokes.map((pts) => {
+    let p = pts;
+    for (let k = 0; k < iterations && p.length > 2; k++) {
+      const q: V2[] = [p[0]!];
+      for (let i = 0; i < p.length - 1; i++) {
+        const a = p[i]!, b = p[i + 1]!;
+        q.push({ x: 0.75 * a.x + 0.25 * b.x, y: 0.75 * a.y + 0.25 * b.y }, { x: 0.25 * a.x + 0.75 * b.x, y: 0.25 * a.y + 0.75 * b.y });
+      }
+      q.push(p[p.length - 1]!);
+      p = q;
+    }
+    return p;
+  });
+  const lens = strokes.map((p) => polylineLengths(p));
+  const startLen: number[] = [];
+  let acc = 0;
+  for (const L of lens) { startLen.push(acc); acc += L[L.length - 1] ?? 0; }
+  const charRange: [number, number][] = st.charRange.map(() => [Infinity, -Infinity]);
+  strokes.forEach((_, i) => {
+    const r = charRange[st.charOf[i]!]!;
+    r[0] = Math.min(r[0], startLen[i]!);
+    r[1] = Math.max(r[1], startLen[i]! + (lens[i]![lens[i]!.length - 1] ?? 0));
+  });
+  let last = 0;
+  for (const r of charRange) {
+    if (r[0] === Infinity) { r[0] = last; r[1] = last; }
+    last = r[1];
+  }
+  return { ...st, strokes, lens, startLen, total: acc, charRange };
+}
+
+/**
  * Draw the first `len` px of a StrokeText into a Canvas2D context (already transformed).
  * Returns the pen position (the "spark" head) or null if nothing drawn.
  */

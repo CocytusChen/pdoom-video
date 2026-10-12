@@ -8,7 +8,8 @@
 //     scatter of minds fills the plane, nodding along, uncorrelated. The flat regression line (r = 0.00) is a
 //     guitar string: "blues" stands on it and bends it with the singer's actual pitch — the held C4 with its
 //     vibrato, then the flip up an octave (tab notation: vib., bend +12) — and it rings when released; the
-//     B-flat that follows earns a lone orange flat sign. The last half-beat inhales before the cut to the bridge.
+//     B-flat that follows earns a lone orange flat sign: the dominant of the song's E-flat major, so not even a
+//     blue note. The last half-beat inhales before the cut to the bridge.
 import * as THREE from 'three';
 import { Scene, type Frame, type PostOverrides } from '../engine/scene';
 import { FSPass, Layer2D, W, H } from '../engine/gl';
@@ -1016,7 +1017,7 @@ export default class Fuse extends Scene {
         c.textAlign = 'left';
       }
     }
-    // the blue note: a scrap of staff, one B-flat on its middle line; the flat and the note in orange
+    // the B-flat that follows: a scrap of staff, one B-flat on its middle line; the flat and the note in orange
     const kf = prog(t, this.tBlueNote - 0.06, this.tBlueNote + 0.25, ease.outCubic);
     if (kf > 0 && this.tBlueNote < this.tEnd) {
       const sp = 12, sw = 150;
@@ -1036,7 +1037,7 @@ export default class Fuse extends Scene {
       const la = prog(t, this.tBlueNote + 0.12, this.tBlueNote + 0.4);
       c.font = font(F.mono(400), 14); c.letterSpacing = '1px';
       c.fillStyle = rgba('ash', 0.95 * la);
-      c.fillText('B-flat  ·  the blue note', fx, fy + 3 * sp + 22);
+      c.fillText('B-flat  ·  not even blue', fx, fy + 3 * sp + 22); // the dominant of E-flat major
       c.restore();
     }
     c.letterSpacing = '0px';

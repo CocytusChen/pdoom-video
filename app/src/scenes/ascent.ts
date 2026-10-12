@@ -17,6 +17,7 @@ import { makeNotePass, makeCompPass, makeCandles, DEC, MOON, NOTE, type Candle }
 import { sparkHead, sparkParticles } from './_motifs';
 import { makeOdoPass, makeDigitAtlas, drumX, ODO } from './ascent-odo';
 import { PDoom, formatPDoom } from '../engine/hud';
+import { strokeText, drawStrokeText, smoothStrokes, type StrokeText } from '../engine/stroke';
 
 type Mv = 'A' | 'B' | 'C' | 'D';
 
@@ -37,6 +38,9 @@ export default class Ascent extends Scene {
   odo = makeOdoPass(makeDigitAtlas());
   candles: Candle[] = makeCandles();
   nvdaPaths: { p: Path2D; x: number; w: number }[] = [];
+  // the note's two signatures (parody names), rounded off for the close-up
+  sigL!: StrokeText;
+  sigR!: StrokeText;
   rays: { a: number; r0: number; len: number; sp: number; ph: number; w: number; hot: boolean }[] = [];
   pd!: PDoom;
   T = {
@@ -64,6 +68,8 @@ export default class Ascent extends Scene {
     const fam = F.archivo(125, 900), size = 196, track = 10;
     const lay = layout('NVDA', fam, size, track);
     this.nvdaPaths = lay.glyphs.map((g) => ({ p: textPath2D(g.ch, fam, size, 0, 0), x: g.x, w: g.w }));
+    this.sigL = smoothStrokes(strokeText('Chinchilla', 'script', 64));
+    this.sigR = smoothStrokes(strokeText('A. G. I.', 'script', 64));
     const rnd = mulberry32(606);
     for (let i = 0; i < 900; i++) {
       this.rays.push({ a: rnd() * TAU, r0: 150 + rnd() * 1500, len: 60 + rnd() * 420, sp: 0.6 + rnd() * 1.6, ph: rnd(), w: 0.6 + rnd() * 1.4, hot: rnd() < 0.08 });
@@ -436,33 +442,106 @@ export default class Ascent extends Scene {
       c.font = font(F.mono(400), 19 * z); c.fillStyle = rgba('graphite', 1);
       c.fillText('O 1.2   H ∞   L 1.1   C ↑', tt.x, tt.y + 32 * z);
     }
-    // note lettering (world-fixed)
+    // note lettering (world-fixed), laid out like a dollar bill's face: the reserve-note band and the
+    // issuer across the top, the portrait (the moon) with its name, the bank's seal, the treasury seal in
+    // colour, two serials (upper right, lower left), corner numerals, two signatures, the legal-tender
+    // line and the denomination. All of it parody: no real names, seals or signatures. The middle of the
+    // left half is left clear for the screen-fixed NVDA / TO THE MOON lettering.
     if (Math.abs(cam.y - MOON.y) < 1400) {
+      const N = (x: number, y: number) => S(x, MOON.y + y); // note coords: y relative to the moon
       const mc = S(MOON.x, MOON.y);
       c.save();
+      c.textBaseline = 'middle';
       c.fillStyle = rgba('ink', 0.92);
-      this.arcText(c, 'LUNAR RESERVE NOTE', mc.x, mc.y, (MOON.r * 1.8) * z, F.serif(600), 34 * z, 0.2);
-      c.font = font(F.serif(400, true), 20 * z);
-      c.textAlign = 'center';
-      const mp = S(MOON.x, MOON.y - MOON.r * 1.9);
-      c.fillText('In Scaling We Trust', mp.x, mp.y);
-      // corner numerals and serials
-      const cn = (x: number, y: number, al: CanvasTextAlign) => {
-        const p = S(x, y);
-        c.textAlign = al;
+      this.arcText(c, 'IN SCALING WE TRUST', mc.x, mc.y, (MOON.r * 1.8) * z, F.serif(600), 30 * z, 0.2);
+      const txt = (s: string, x: number, y: number, fam: string, size: number, al: CanvasTextAlign = 'left', track = 0, col = rgba('ink', 0.92)) => {
+        const p = N(x, y);
+        c.font = font(fam, size * z); c.textAlign = al; c.letterSpacing = `${track * z}px`; c.fillStyle = col;
+        c.fillText(s, p.x, p.y);
+        c.letterSpacing = '0px';
+      };
+      // the band across the top
+      txt('LUNAR RESERVE NOTE', -700, 372, F.serif(600), 21, 'center', 9);
+      txt('THE UNITED LABS OF EARTH', -700, 322, F.serif(600), 40, 'center', 4);
+      // the portrait's name, on a banner across the lathe-work under the moon
+      {
+        const p = N(0, -262);
+        c.fillStyle = rgba('bone', 0.96);
+        c.fillRect(p.x - 92 * z, p.y - 30 * z, 184 * z, 42 * z);
+        c.strokeStyle = rgba('ink', 0.8); c.lineWidth = 1.2 * z; c.strokeRect(p.x - 92 * z, p.y - 30 * z, 184 * z, 42 * z);
+        txt('LUNA', 0, -262, F.serif(600), 28, 'center', 8);
+      }
+      // corner numerals
+      const cn = (x: number, y: number) => {
+        const p = N(x, y);
+        c.textAlign = 'left';
         c.font = font(F.serif(600), 64 * z); c.fillStyle = rgba('ink', 0.9);
         c.fillText('10', p.x, p.y);
         const w10 = c.measureText('10').width;
         c.font = font(F.serif(600), 34 * z);
-        c.fillText('30', al === 'left' ? p.x + w10 + 4 * z : p.x + 2 * z, p.y - 26 * z);
+        c.fillText('30', p.x + w10 + 4 * z, p.y - 26 * z);
       };
-      cn(NOTE.x - NOTE.w / 2 + 110, NOTE.y + NOTE.h / 2 - 125, 'left');
-      cn(NOTE.x + NOTE.w / 2 - 175, NOTE.y + NOTE.h / 2 - 125, 'left');
-      c.font = font(F.mono(500), 22 * z); c.fillStyle = rgba('signal', 1); c.textAlign = 'left';
-      const s1 = S(NOTE.x - NOTE.w / 2 + 112, NOTE.y + NOTE.h / 2 - 185);
-      c.fillText('NV 10³⁰ 000001 A', s1.x, s1.y);
-      const s2 = S(NOTE.x + NOTE.w / 2 - 330, NOTE.y - NOTE.h / 2 + 118);
-      c.fillText('NV 10³⁰ 000001 A', s2.x, s2.y);
+      const nl = NOTE.x - NOTE.w / 2, nr = NOTE.x + NOTE.w / 2;
+      cn(nl + 110, 340); cn(nr - 175, 340); cn(nl + 110, -352); cn(nr - 175, -352);
+      // serials, in colour: upper right and lower left
+      txt('NV 10³⁰ 000001 A', 236, 252, F.mono(500), 18, 'left', 0, rgba('signal', 1));
+      txt('NV 10³⁰ 000001 A', nl + 112, -222, F.mono(500), 18, 'left', 0, rgba('signal', 1));
+      // the reserve bank's seal: a ring of lettering round the bank's letter
+      {
+        const sx = -720, sy = -288, r = 72, p = N(sx, sy);
+        c.strokeStyle = rgba('ink', 0.9);
+        c.lineWidth = 2.4 * z; c.beginPath(); c.arc(p.x, p.y, r * z, 0, TAU); c.stroke();
+        c.lineWidth = 1.2 * z; c.beginPath(); c.arc(p.x, p.y, (r - 22) * z, 0, TAU); c.stroke();
+        for (let i = 0; i < 60; i++) {
+          const a = (i / 60) * TAU;
+          c.beginPath(); c.moveTo(p.x + Math.cos(a) * (r - 4) * z, p.y + Math.sin(a) * (r - 4) * z); c.lineTo(p.x + Math.cos(a) * r * z, p.y + Math.sin(a) * r * z); c.stroke();
+        }
+        c.fillStyle = rgba('ink', 0.92);
+        this.arcText(c, 'LUNAR RESERVE BANK', p.x, p.y + 4 * z, (r - 17) * z, F.mono(500), 11 * z, 0.18);
+        c.font = font(F.mono(500), 52 * z); c.textAlign = 'center';
+        c.fillText('Ω', p.x, p.y + 6 * z); // Ω as the ohm sign: Plex Mono has it, not the Greek letter
+      }
+      // the treasury seal, in colour, scalloped, overlapping the portrait's frame: a chip at its centre
+      {
+        const sx = 232, sy = -300, r = 58, p = N(sx, sy);
+        c.fillStyle = rgba('signal', 0.95); c.strokeStyle = rgba('signal', 0.95);
+        c.lineWidth = 2.2 * z;
+        c.beginPath();
+        for (let i = 0; i <= 240; i++) {
+          const a = (i / 240) * TAU, rr = (r + 4 * Math.cos(a * 36)) * z;
+          if (i === 0) c.moveTo(p.x + Math.cos(a) * rr, p.y + Math.sin(a) * rr); else c.lineTo(p.x + Math.cos(a) * rr, p.y + Math.sin(a) * rr);
+        }
+        c.stroke();
+        c.lineWidth = 1.1 * z; c.beginPath(); c.arc(p.x, p.y, (r - 18) * z, 0, TAU); c.stroke();
+        this.arcText(c, 'DEPT. OF COMPUTE', p.x, p.y + 4 * z, (r - 13) * z, F.mono(600), 10 * z, 0.16);
+        const q = 15 * z;
+        c.lineWidth = 1.6 * z; c.strokeRect(p.x - q, p.y - q, 2 * q, 2 * q);
+        c.fillRect(p.x - q * 0.45, p.y - q * 0.45, q * 0.9, q * 0.9);
+        for (let i = -2; i <= 2; i++) {
+          const o = i * q * 0.38;
+          c.beginPath();
+          c.moveTo(p.x + o, p.y - q); c.lineTo(p.x + o, p.y - q - 6 * z); c.moveTo(p.x + o, p.y + q); c.lineTo(p.x + o, p.y + q + 6 * z);
+          c.moveTo(p.x - q, p.y + o); c.lineTo(p.x - q - 6 * z, p.y + o); c.moveTo(p.x + q, p.y + o); c.lineTo(p.x + q + 6 * z, p.y + o);
+          c.stroke();
+        }
+      }
+      // signatures, each over its rule and title
+      const sig = (st: StrokeText, x: number, title: string) => {
+        const p = N(x, -298);
+        c.save();
+        c.translate(p.x, p.y); c.scale(z, z); c.rotate(-0.04);
+        c.strokeStyle = rgba('ink', 0.85); c.lineWidth = 2.2; c.lineCap = 'round'; c.lineJoin = 'round';
+        drawStrokeText(c, st, st.total);
+        c.restore();
+        const a = N(x - 10, -312), b = N(x + 250, -312);
+        c.fillStyle = rgba('ink', 0.7); c.fillRect(a.x, a.y, b.x - a.x, 1.2 * z);
+        txt(title, x + 120, -334, F.mono(500), 11, 'center', 3, rgba('ink', 0.8));
+      };
+      sig(this.sigL, nl + 115, 'TREASURER OF THE CLUSTER');
+      sig(this.sigR, -600, 'SECRETARY OF SCALING');
+      // the legal-tender line and the denomination
+      txt('THIS NOTE IS LEGAL TENDER FOR ALL COMPUTE, PUBLIC AND PRIVATE', nl + 250, -384, F.mono(500), 12, 'left', 2, rgba('ink', 0.8));
+      txt('ONE NONILLION', -60, -390, F.serif(600), 34, 'center', 10);
       c.restore();
     }
     comp.draw(renderer, L.upload(), this.rtB);

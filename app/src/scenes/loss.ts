@@ -1,6 +1,6 @@
 // FIG. 2 `loss` — "Training loss, suddenly".
 // A hairline log-scale chart draws in from black; the spark draws a noisy loss plateau while
-// the lyric rides the curve. On "drop" the curve falls off a grokking cliff, the camera falls
+// the lyric rides the curve. On "drop" the curve falls off a cliff (a phase transition), the camera falls
 // with it out of the bottom of the chart into a 3D loss landscape engraved as illuminated
 // contour lines (the log-loss levels continue the chart's axis), the spark descending a canyon
 // (the only orange thing) toward a sharp minimum. "now I'm your servant and you're my boss":
@@ -29,6 +29,12 @@ const smin = (a: number, b: number, k: number) => {
   return lerp(b, a, h) - k * h * (1 - h);
 };
 const BOWL0 = -0.62 * VB - 1.2;
+// two gentle features on the basin's slope, labelled: a shallow dimple (a real local minimum) and a low
+// bump, whose uphill side holds a saddle point (zero gradient, a minimum along the slope, a maximum across)
+const FEATS = [
+  { u: -5.3, v: 11.2, amp: -1.2, r: 1.1, kind: 'min' as const },
+  { u: 6.0, v: 9.5, amp: 1.6, r: 1.1, kind: 'saddle' as const },
+];
 function terrH(u: number, v: number, pit = true): number {
   const s = Math.sin;
   const hills = 1.0 * s(0.42 * u + 0.6 * s(0.31 * v)) * s(0.37 * v + 0.5 * s(0.29 * u))
@@ -46,6 +52,7 @@ function terrH(u: number, v: number, pit = true): number {
   const bu = u - UB, bv = v - VB, r2 = bu * bu + bv * bv;
   h = smin(h, BOWL0 + 0.07 * r2, 2.5);
   if (pit) h -= (KPIT / Math.sqrt(r2 + EPS * EPS)) * Math.exp(-r2 / (SIG * SIG));
+  for (const f of FEATS) h += f.amp * Math.exp(-((u - f.u) ** 2 + (v - f.v) ** 2) / (f.r * f.r));
   return h;
 }
 const TERRAIN_GLSL = /* glsl */ `
@@ -71,6 +78,7 @@ float terrH(vec2 q) {
   float r2 = dot(b, b);
   h = sminT(h, ${BOWL0.toFixed(5)} + 0.07 * r2, 2.5);
   h -= ${KPIT.toFixed(4)} / sqrt(r2 + ${(EPS * EPS).toFixed(6)}) * exp(-r2 / ${(SIG * SIG).toFixed(4)});
+${FEATS.map((f) => `  { vec2 c = q - vec2(${f.u.toFixed(4)}, ${f.v.toFixed(4)}); h += ${f.amp.toFixed(4)} * exp(-dot(c, c) / ${(f.r * f.r).toFixed(4)}); }`).join('\n')}
   return h;
 }`;
 
@@ -361,19 +369,30 @@ export default class LossScene extends Scene {
     // P(doom), surveyed like any other elevation (one on the canyon wall, one on the basin rim)
     addContour(1.9 + cuF(4.2), 4.2, 'pdoom');
     addContour(UB - 3.3, VB + 1.2, 'pdoom');
-    // local minima of the hills (gradient descent from a few seeds), away from the canyon & basin
-    const found: { u: number; v: number }[] = [];
-    for (let su = -9; su <= 9; su += 2.2) for (let sv = 1; sv <= 16; sv += 2.2) {
-      let u = su, v = sv;
-      for (let i = 0; i < 200; i++) { const [gu, gv] = grad(u, v); u -= gu * 0.08; v -= gv * 0.08; }
-      const dCanyon = Math.abs(u - cuF(v));
-      const dBasin = Math.hypot(u - UB, v - VB);
-      if (dCanyon < 2.8 || dBasin < 5 || v < 1 || v > 17 || Math.abs(u) > 11) continue;
-      if (found.some((m) => Math.hypot(m.u - u, m.v - v) < 1.5)) continue;
-      found.push({ u, v });
+    // the critical points the features actually have: Newton on the gradient, from the dimple's centre, or
+    // for the saddle from the bump's uphill flank (it sits ~0.9 r uphill of the top)
+    const crit = (u: number, v: number) => {
+      const E = 0.01;
+      for (let i = 0; i < 40; i++) {
+        const [gu, gv] = grad(u, v);
+        if (Math.hypot(gu, gv) < 1e-9) break;
+        const [au, av] = grad(u + E, v), [bu, bv] = grad(u - E, v), [cu, cv] = grad(u, v + E), [du, dv] = grad(u, v - E);
+        const huu = (au - bu) / (2 * E), huv = (av - bv) / (2 * E), hvu = (cu - du) / (2 * E), hvv = (cv - dv) / (2 * E);
+        const det = huu * hvv - huv * hvu;
+        if (Math.abs(det) < 1e-9) break;
+        u -= (hvv * gu - huv * gv) / det; v -= (-hvu * gu + huu * gv) / det;
+      }
+      return { u, v };
+    };
+    for (const f of FEATS) {
+      let u0 = f.u, v0 = f.v;
+      if (f.kind === 'saddle') {
+        const [su, sv] = grad(f.u, f.v), n = Math.hypot(su, sv); // uphill, with the bump in it: still uphill
+        u0 += (su / n) * f.r * 0.9; v0 += (sv / n) * f.r * 0.9;
+      }
+      const m = crit(u0, v0);
+      this.labels.push({ p: { x: this.xC + m.u, y: YR + terrH(m.u, m.v) + 0.05, z: -m.v }, ang: { x: 1, y: 0, z: 0 }, text: f.kind === 'min' ? 'local min.' : 'saddle point', kind: 'min' });
     }
-    found.sort((a, b) => a.v - b.v);
-    for (const m of found.slice(0, 4)) this.labels.push({ p: { x: this.xC + m.u, y: YR + terrH(m.u, m.v) + 0.05, z: -m.v }, ang: { x: 1, y: 0, z: 0 }, text: 'local min.', kind: 'min' });
     this.labels.push({ p: { x: this.xC + UB, y: YR + BOWL0 - 0.2, z: -VB }, ang: { x: 1, y: 0, z: 0 }, text: 'sharp minimum', sub: '(generalizes poorly)', kind: 'pit' });
   }
 
@@ -859,7 +878,7 @@ export default class LossScene extends Scene {
         c.font = font(F.mono(400), fs);
         c.textAlign = 'left';
         c.fillStyle = rgba('bone', 0.9 * an);
-        c.fillText('grokking (?)', p.x, p.y);
+        c.fillText('phase transition (?)', p.x, p.y); // not grokking: that is a late drop in *test* loss
         c.fillStyle = rgba('ash', 0.9 * an);
         c.fillText('\u2206loss −99.9999%', p.x, p.y + fs * 1.3); // U+2206 INCREMENT (Plex Mono has no Greek Δ)
       }
